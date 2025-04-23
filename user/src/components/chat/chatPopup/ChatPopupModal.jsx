@@ -18,7 +18,7 @@ const ChatPopupModal = ({ onClose, chatList = [], onSelectChat }) => {
   }, [onClose]);
 
   return (
-    <div className="absolute right-4 top-16 z-50 w-96 rounded-md shadow-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700" ref={modalRef}>
+    <div className="absolute right-4 top-16 z-50 w-96 rounded-md shadow-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 z-[70]" ref={modalRef}>
       <div className="p-4 border-b dark:border-zinc-700 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-zinc-800 dark:text-white">Tin nhắn</h2>
         {/* Tuỳ chọn lọc */}

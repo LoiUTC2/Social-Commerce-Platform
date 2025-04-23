@@ -3,6 +3,8 @@ import LeftSidebar from '../../components/layout/LeftSidebar';
 import RightSidebar from '../../components/layout/RightSidebar';
 import FeedItem from '../../components/feed/FeedItem';
 import { Button } from '../../components/ui/button';
+import StoryBar from '../../components/feed/StoryBar';
+import CreatePost from '../../components/feed/CreatePost';
 
 const FeedPage = ({ showTabs = false }) => {
   const [tab, setTab] = useState('popular');
@@ -54,6 +56,9 @@ const FeedPage = ({ showTabs = false }) => {
 
           {/* Feed content */}
           <main className="flex-1 space-y-4">
+            <CreatePost />
+            <StoryBar />
+          
             {[1, 2, 3].map((id) => (
               <FeedItem key={id} id={id} />
             ))}
