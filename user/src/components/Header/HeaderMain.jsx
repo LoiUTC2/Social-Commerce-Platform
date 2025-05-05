@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button';
 import DarkModeToggle from '../../components/common/DarkModeToggle';
 import { useNavigate } from 'react-router-dom';
 import HeaderChatIcon from '../chat/HeaderChatIcon';
+import UserMenu from '../common/UserMenu';
 
 const HeaderMain = () => {
   const navigate = useNavigate();
@@ -40,7 +41,7 @@ const HeaderMain = () => {
         <Bell className="cursor-pointer hover:text-pink-500" />
         <ShoppingCart className="cursor-pointer hover:text-pink-500" />
         <HeaderChatIcon className="cursor-pointer hover:text-pink-500"/>
-        <User className="cursor-pointer hover:text-pink-500" />
+        <UserMenu className="cursor-pointer hover:text-pink-500" />
         <DarkModeToggle />
       </div>
     </div>

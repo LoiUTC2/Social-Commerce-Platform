@@ -3,14 +3,23 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const tokenService = require('../utils/tokenService');
 
-const sendRefreshToken = (res, token) => {
-    res.cookie('refreshToken', token, {
-        httpOnly: true,
-        secure: true,           // chỉ dùng https (set false nếu test local)
-        sameSite: 'Strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 ngày
+const sendTokenCookies = (res, accessToken, refreshToken) => {
+    // Access Token
+    res.cookie('accessToken', accessToken, {
+      httpOnly: false,
+      secure: true, // chỉ nên true nếu dùng https
+      sameSite: 'Strict',
+      maxAge: 15 * 60 * 1000 // 15 phút
     });
-};
+  
+    // Refresh Token
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
+    });
+  };
 
 exports.register = async (req, res) => {
     try {
@@ -44,12 +53,12 @@ exports.login = async (req, res) => {
         user.refreshToken = refreshToken;
         await user.save();
 
-        sendRefreshToken(res, refreshToken);
+        sendTokenCookies(res, accessToken, refreshToken);
 
         res.json({
             accessToken,
             user: {
-                id: user._id,
+                _id: user._id,
                 fullName: user.fullName,
                 email: user.email,
                 role: user.role
@@ -77,7 +86,7 @@ exports.refreshToken = async (req, res) => {
         user.refreshToken = newRefreshToken;
         await user.save();
 
-        sendRefreshToken(res, newRefreshToken);
+        sendTokenCookies(res, newAccessToken, newRefreshToken);
 
         res.json({ accessToken: newAccessToken });
     } catch (err) {
