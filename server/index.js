@@ -6,17 +6,27 @@ const cookieParser = require('cookie-parser');
 
 const app = express();
 
-app.use(cors());
+// app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:3000', // địa chỉ frontend
+  credentials: true, // QUAN TRỌNG để gửi cookie
+}));
 app.use(express.json());
 app.use(cookieParser());
 
 const authRoutes = require('./routes/authRoutes');
 const interactionRoutes = require('./routes/interactionRoutes');
 const postRoutes = require('./routes/postRoutes');
+const socialRoutes = require('./routes/postInteractionRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/interactions', interactionRoutes);
 app.use('/api/posts', postRoutes);
+app.use('/api/postInteraction', socialRoutes);
+
+app.use('/api/upload', uploadRoutes);
+app.use('/uploads', express.static('uploads')); // phục vụ file tĩnh
 
 
 // Gọi hàm kết nối MongoDB

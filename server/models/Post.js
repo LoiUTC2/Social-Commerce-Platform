@@ -12,6 +12,11 @@ const postSchema = new mongoose.Schema({
   location: String,
   isSponsored: { type: Boolean, default: false }, //được tài trợ
 
+  type: {type: String, enum: ['normal', 'share'], default: 'normal'},
+
+  sharedPost: {type: mongoose.Schema.Types.ObjectId, ref: 'Post', default: null}, //đây là bài viết gốc (nếu nó là bài share), bản chất nó là 1 oject, lưu _id chỉ là đại diện thôi
+  privacy: {type: String, enum: ['public', 'friends', 'private'], default: 'public'},
+
   likesCount: { type: Number, default: 0 },
   commentsCount: { type: Number, default: 0 },
   sharesCount: { type: Number, default: 0 },
