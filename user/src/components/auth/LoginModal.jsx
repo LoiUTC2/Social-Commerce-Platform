@@ -51,6 +51,23 @@ export default function LoginModal() {
     }
   };
 
+  //Server cần thêm route OAuth (dùng passport.js để xử lý Google/Facebook login).
+  const handleGoogleLogin = async () => {
+    try {
+      window.location.href = 'http://localhost:5000/api/auth/google'; // Chuyển hướng đến route OAuth
+    } catch (err) {
+      toast.error('Đăng nhập bằng Google thất bại');
+    }
+  };
+  
+  const handleFacebookLogin = async () => {
+    try {
+      window.location.href = 'http://localhost:5000/api/auth/facebook';
+    } catch (err) {
+      toast.error('Đăng nhập bằng Facebook thất bại');
+    }
+  };
+
   return (
     <Dialog open={showLoginModal} onOpenChange={setShowLoginModal}>
       <DialogContent className="sm:max-w-md">
@@ -88,10 +105,10 @@ export default function LoginModal() {
 
           {/* Hoặc đăng nhập bằng */}
           <div className="flex items-center justify-center gap-2">
-            <Button variant="outline" className="flex-1 flex items-center gap-2 justify-center" disabled={isLoading}>
+            <Button variant="outline" className="flex-1 flex items-center gap-2 justify-center" onClick={handleGoogleLogin} disabled={isLoading}>
               <FcGoogle /> Google
             </Button>
-            <Button variant="outline" className="flex-1 flex items-center gap-2 justify-center" disabled={isLoading}>
+            <Button variant="outline" className="flex-1 flex items-center gap-2 justify-center" onClick={handleFacebookLogin} disabled={isLoading}>
               <FaFacebook className="text-blue-600" /> Facebook
             </Button>
           </div>
