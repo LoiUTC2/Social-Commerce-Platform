@@ -6,20 +6,20 @@ const tokenService = require('../utils/tokenService');
 const sendTokenCookies = (res, accessToken, refreshToken) => {
     // Access Token
     res.cookie('accessToken', accessToken, {
-      httpOnly: false,
-      secure: true, // chỉ nên true nếu dùng https
-      sameSite: 'Strict',
-      maxAge: 15 * 60 * 1000 // 15 phút
+        httpOnly: false, //cookie có thể được truy cập bởi JavaScript trên client.
+        secure: true, // chỉ nên true nếu dùng https
+        sameSite: 'Strict',
+        maxAge: 15 * 60 * 1000 // 15 phút
     });
-  
+
     // Refresh Token
     res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
+        httpOnly: true, //cookie chỉ có thể được truy cập bởi server và không thể bị truy cập bởi JavaScript trên trình duyệt.
+        secure: true,
+        sameSite: 'Strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
     });
-  };
+};
 
 exports.register = async (req, res) => {
     try {
@@ -46,11 +46,17 @@ exports.login = async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(401).json({ message: 'Sai mật khẩu' });
 
+        const csrfToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' }); //Chống CSRF hiệu quả hơn.
+        res.cookie('csrfToken', csrfToken, { httpOnly: false, secure: true, sameSite: 'Strict' });
+
         const payload = { userId: user._id, role: user.role };
         const accessToken = tokenService.generateAccessToken(payload);
         const refreshToken = tokenService.generateRefreshToken(payload);
 
         user.refreshToken = refreshToken;
+        user.refreshTokenUsage = 0;
+        user.ip = req.ip; // Lưu IP
+        user.userAgent = req.headers['user-agent']; // Lưu user-agent
         await user.save();
 
         sendTokenCookies(res, accessToken, refreshToken);
@@ -61,7 +67,8 @@ exports.login = async (req, res) => {
                 _id: user._id,
                 fullName: user.fullName,
                 email: user.email,
-                role: user.role
+                role: user.role,
+                shopId: user.shopId,
             }
         });
     } catch (err) {
@@ -70,8 +77,13 @@ exports.login = async (req, res) => {
 };
 
 exports.refreshToken = async (req, res) => {
-    const token = req.cookies.refreshToken;
-    if (!token) return res.status(401).json({ message: 'Không có refresh token' });
+    const token = req.cookies.refreshToken || '';
+    if (!token) return res.status(403).json({ message: 'Không có refresh token' });
+
+    //Chống CSRF hiệu quả hơn.
+    if (req.headers['x-csrf-token'] !== req.cookies.csrfToken) {
+        return res.status(403).json({ message: 'CSRF token không hợp lệ' });
+    }
 
     try {
         const decoded = tokenService.verifyRefreshToken(token);
@@ -79,22 +91,53 @@ exports.refreshToken = async (req, res) => {
         if (!user || user.refreshToken !== token)
             return res.status(403).json({ message: 'Refresh token không hợp lệ' });
 
+        // Kiểm tra thiết bị
+        if (user.ip !== req.ip || user.userAgent !== req.headers['user-agent']) {
+            user.refreshToken = null;
+            await user.save();
+            return res.status(403).json({ message: 'Thiết bị không khớp' });
+        }
+
+        user.refreshTokenUsage += 1;
+        if (user.refreshTokenUsage > 10) { // Giới hạn 10 lần, Ngăn chặn lạm dụng refresh token nếu bị lộ.
+            user.refreshToken = null;
+            await user.save();
+            return res.status(403).json({ message: 'Refresh token vượt quá số lần sử dụng' });
+        }
+
         // Tạo mới
         const newAccessToken = tokenService.generateAccessToken({ userId: user._id, role: user.role });
         const newRefreshToken = tokenService.generateRefreshToken({ userId: user._id, role: user.role });
 
         user.refreshToken = newRefreshToken;
+        user.ip = req.ip; // Cập nhật IP mới
+        user.userAgent = req.headers['user-agent']; // Cập nhật user-agent mới
         await user.save();
 
         sendTokenCookies(res, newAccessToken, newRefreshToken);
 
-        res.json({ accessToken: newAccessToken });
+        res.json({
+            accessToken: newAccessToken,
+            user: {
+                _id: user._id,
+                fullName: user.fullName,
+                email: user.email,
+                role: user.role,
+                shopId: user.shopId,
+            }
+        });
+        // res.json({accessToken: newAccessToken });
     } catch (err) {
         res.status(403).json({ message: 'Token hết hạn hoặc không hợp lệ' });
     }
 };
 
 exports.logout = async (req, res) => {
+    //Chống CSRF hiệu quả hơn.
+    if (req.headers['x-csrf-token'] !== req.cookies.csrfToken) {
+        return res.status(403).json({ message: 'CSRF token không hợp lệ' });
+    }
+
     try {
         const token = req.cookies.refreshToken;
         if (!token) return res.sendStatus(204); // No content
@@ -107,6 +150,16 @@ exports.logout = async (req, res) => {
 
         res.clearCookie('refreshToken', {
             httpOnly: true,
+            secure: true,
+            sameSite: 'Strict'
+        });
+        res.clearCookie('accessToken', {
+            httpOnly: false,
+            secure: true,
+            sameSite: 'Strict'
+        });
+        res.clearCookie('csrfToken', {
+            httpOnly: false,
             secure: true,
             sameSite: 'Strict'
         });

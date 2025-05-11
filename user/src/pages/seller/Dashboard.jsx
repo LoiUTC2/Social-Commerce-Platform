@@ -28,6 +28,7 @@ ChartJS.register(
   Tooltip,
   Legend
 );
+
 export default function Dashboard() {
   // Giả lập dữ liệu
   const summary = [
@@ -52,6 +53,7 @@ export default function Dashboard() {
 
   const chartOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
     },
@@ -78,8 +80,8 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Biểu đồ */}
-      <Card>
+      {/* Biểu đồ - Adjusted height and added margin-bottom */}
+      <Card className="mb-6">
         <CardContent className="p-4">
           <p className="font-semibold mb-4">📈 Doanh thu 5 tháng gần nhất</p>
           <div className="h-64">
