@@ -3,29 +3,73 @@ const User = require('../models/User');
 const UserInteraction = require('../models/UserInteraction');
 const { successResponse, errorResponse } = require('../utils/response');
 
-// Bật chế độ seller + tạo shop mới nếu chưa có
-exports.activateSellerMode = async (req, res) => {
+//Chuyển đổi tài khoản, seller hoặc buyer
+exports.switchUserRole1 = async (req, res) => {
+    const userId = req.user.userId;
+    const currentRole = req.user.role;
+
+    if (!['buyer', 'seller'].includes(currentRole)) {
+        return errorResponse(res, 'Vai trò không hợp lệ', 400);
+    }
+
     try {
-        const userId = req.user.userId;
-
-        // Kiểm tra người dùng
         const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ message: 'Không tìm thấy người dùng' });
-
-        // Nếu đã có shop, không tạo lại
-        if (user.isSellerActive && user.shopId) {
-            return res.status(400).json({ message: 'Bạn đã là người bán' });
+        if (!user) {
+            return errorResponse(res, 'Không tìm thấy người dùng', 403);
         }
 
-        // Cập nhật user
-        user.isSellerActive = true;
-        user.role = 'seller';
+        if (!user.roles.includes(currentRole)) {
+            return errorResponse(res, 'Bạn không có quyền chuyển sang vai trò này', 403);
+        }
+
+        if (currentRole === "seller") {
+            user.role = "buyer";
+            await user.save();
+            return successResponse(res, `Chuyển sang vai trò ${currentRole} thành công`, { role: currentRole });
+        }
+
+        if (currentRole === "buyer") {
+            user.role = "seller";
+            await user.save();
+            return successResponse(res, `Chuyển sang vai trò ${currentRole} thành công`, { role: currentRole });
+        }
+
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi chuyển vai trò', 500, err.message);
+    }
+};
+
+//Chuyển đổi tài khoản, seller hoặc buyer
+exports.switchUserRole = async (req, res) => {
+    const userId = req.user.userId;
+
+    try {
+        const user = await User.findById(userId);
+        if (!user) return errorResponse(res, 'Không tìm thấy người dùng', 404);
+
+        const targetRole = user.role === 'buyer' ? 'seller' : 'buyer';
+
+        // Kiểm tra user có quyền đó không
+        if (!user.roles.includes(targetRole)) {
+            return errorResponse(res, `Bạn chưa có quyền chuyển sang ${targetRole}`, 403);
+        }
+
+        user.role = targetRole;
         await user.save();
 
-        res.status(201).json({ message: 'Kích hoạt người bán thành công', shop: newShop });
+        const userData = {
+                _id: user._id,
+                fullName: user.fullName,
+                email: user.email,
+                roles: user.roles,
+                role: user.role,
+                shopId: user.shopId,
+                isSellerActive: user.isSellerActive,     
+        };
+
+        return successResponse(res, `Chuyển sang vai trò ${targetRole} thành công`, userData);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Lỗi server' });
+        return errorResponse(res, 'Lỗi khi chuyển vai trò', 500, err.message);
     }
 };
 

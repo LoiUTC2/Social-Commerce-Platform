@@ -1,7 +1,10 @@
+import { useAuth } from '../../contexts/AuthContext';
 import React from 'react';
 import { FaFacebookF, FaInstagram, FaTwitter, FaYoutube } from 'react-icons/fa';
 
+
 const HeaderTop = () => {
+  const {isSeller} = useAuth();
   return (
     <div className="bg-gray-100 text-sm text-gray-600 px-4 py-2 flex justify-between items-center">
       <div className="space-x-4">

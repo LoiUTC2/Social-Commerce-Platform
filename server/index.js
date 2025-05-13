@@ -32,7 +32,7 @@ app.use('/api/interactions', interactionRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/postInteraction', socialRoutes);
 app.use('/api/products', productRoutes);
-app.use('/api/shop', shopRoutes);
+app.use('/api/shops', shopRoutes);
 
 app.use('/api/admin/shops', shopManagerRoutes); //quản lí duyệt shop đăng kí
 app.use('/api/admin/products', adminProductRoutes); //quản lí sản phẩm nền tảng

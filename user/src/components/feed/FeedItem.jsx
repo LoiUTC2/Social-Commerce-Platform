@@ -73,7 +73,7 @@ export default function FeedItem({ post }) {
         setLikes(likesData.length);
         // Kiểm tra xem user hiện tại đã like bài viết chưa
         if (user) {
-          const userLiked = likesData.some(likeItem => likeItem._id === user._id);
+          const userLiked = likesData.some(likeItem => likeItem?._id === user?._id);
           setLiked(userLiked);
         }
       } catch (err) {
@@ -93,17 +93,17 @@ export default function FeedItem({ post }) {
       if (res.message.includes('Đã thích')) {
         setLiked(true);
         // Thêm user hiện tại vào danh sách likes nếu chưa có
-        const userAlreadyLiked = likesList.some(like => like._id === user._id);
+        const userAlreadyLiked = likesList.some(like => like._id === user?._id);
         if (!userAlreadyLiked) {
           setLikesList(prev => [...prev, {
-            _id: user._id,
-            fullName: user.fullName,
-            avatar: user.avatar
+            _id: user?._id,
+            fullName: user?.fullName,
+            avatar: user?.avatar
           }]);
         }
       } else {
         setLiked(false);
-        setLikesList(prev => prev.filter(like => like._id !== user._id)); // Xóa user hiện tại khỏi danh sách likes
+        setLikesList(prev => prev.filter(like => like?._id !== user?._id)); // Xóa user hiện tại khỏi danh sách likes
       }
     } catch (err) {
       console.error('Lỗi like bài viết:', err);
@@ -268,8 +268,8 @@ export default function FeedItem({ post }) {
                   ) : (
                     <div className="max-w-[200px]">
                       {likesList.slice(0, 5).map((user) => (
-                        <div key={user._id} className="truncate">
-                          {user.fullName}
+                        <div key={user?._id} className="truncate">
+                          {user?.fullName}
                         </div>
                       ))}
                       {likesList.length > 5 && (

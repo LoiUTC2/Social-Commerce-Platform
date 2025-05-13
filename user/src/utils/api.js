@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { toast } from 'sonner';
-import LoginModal from '../components/auth/LoginModal';
 
 const api = axios.create({
   baseURL: 'http://localhost:5000/api', // hoặc domain backend của bạn
@@ -50,8 +49,17 @@ api.interceptors.response.use(
         console.error('Làm mới token thất bại:', refreshError);
         // localStorage.removeItem('accessToken');
         toast.error('Phiên của bạn đã hết hạn. Vui lòng đăng nhập lại.');
-        <><LoginModal/></>
-        // window.location.href = '/auth/login'; // Hoặc mở LoginModal nếu bạn dùng modal
+        
+        // Gửi tín hiệu để mở LoginModal thay vì redirect ngay
+        if (window.openLoginModal) {
+          window.openLoginModal(); // Gọi hàm để mở modal (định nghĩa trong AuthContext)
+        } else {
+          // Nếu không có hàm openLoginModal, fallback sang redirect
+          if (window.location.pathname !== '/auth/login') {
+            alert('Phiên của bạn đã hết hạn. Vui lòng đăng nhập lại.');
+            window.location.href = '/auth/register';
+          }
+        }
       }
     }
 

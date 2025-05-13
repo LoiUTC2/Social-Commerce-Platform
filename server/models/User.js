@@ -10,15 +10,16 @@ const userSchema = new mongoose.Schema({
   gender: { type: String, enum: ['male', 'female', 'other'] },
   dateOfBirth: Date,
   address: String,
-  role: { type: String, enum: ['buyer', 'seller', 'admin'], default: 'buyer' }, //phải được admin duyệt shop thì mới có quyền là seller
-  isSellerActive: { type: Boolean, default: false }, // đã bật chế độ bán hàng chưa
+  roles: { type: [String], enum: ['buyer', 'seller', 'admin'], default: ['buyer'] }, //danh sách role, phải được admin duyệt shop thì mới có quyền là seller
+  role: { type: String, enum: ['buyer', 'seller', 'admin'], default: 'buyer' }, //role hiện tại của người dùng
+  // isSellerActive: { type: Boolean, default: false }, // đã bật chế độ bán hàng chưa
   shopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shop' }, // liên kết đến shop nếu là seller, khi đăng kí shop thì sẽ có shopId ngay
   followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   savedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
   likedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
   likedComments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Comment' }],
-  refreshToken: String, 
+  refreshToken: String,
   refreshTokenUsage: { type: Number, default: 0 }, //Kiểm soát giới hạn sử dụng refresh token
   ip: String, //Kiểm tra thiết bị đăng nhập
   userAgent: String, //Kiểm tra thiết bị đăng nhập

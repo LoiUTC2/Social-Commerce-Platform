@@ -26,14 +26,14 @@ const LikesListModal = ({ open, onOpenChange, likes = [] }) => {
                         <div className="text-center text-gray-500 py-10">Chưa có ai thích bài viết này</div>
                     ) : (
                         likes.map((user) => (
-                            <div key={user.id} className="flex items-center gap-3 p-2 rounded hover:bg-gray-100">
+                            <div key={user?.id} className="flex items-center gap-3 p-2 rounded hover:bg-gray-100">
                                 <img
-                                    src={user.avatar || '/avatar-default.jpg'}
-                                    alt={user.fullName}
+                                    src={user?.avatar || '/avatar-default.jpg'}
+                                    alt={user?.fullName}
                                     className="w-10 h-10 rounded-full object-cover"
                                 />
                                 <div className="flex-1">
-                                    <div className="font-medium">{user.fullName}</div>
+                                    <div className="font-medium">{user?.fullName}</div>
                                     {/* <div className="text-xs text-gray-400">Bạn bè</div> nếu sau này muốn thêm label */}
                                 </div>
                                 <Button size="sm" variant="outline">

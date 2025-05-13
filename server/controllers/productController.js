@@ -18,11 +18,35 @@ const generateUniqueSlug = async (name) => {
     return slug;
 };
 
+//hàm này để bỏ dấu
+const removeVietnameseTones = (str) => {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D");
+};
+const generateSKU = async (name, sellerId) => {
+    const prefix = removeVietnameseTones(name).substring(0, 3).toUpperCase();
+    const sellerCode = sellerId.toString().slice(-6); // Lấy 6 ký tự cuối của sellerId
+    const randomNum = Math.floor(1000 + Math.random() * 9000); // Số ngẫu nhiên 4 chữ số
+
+    let sku = `${prefix}-${sellerCode}-${randomNum}`;
+    let existingProduct = await Product.findOne({ sku });
+    let count = 1;
+
+    // Đảm bảo SKU là duy nhất
+    while (existingProduct) {
+        sku = `${prefix}-${sellerCode}-${randomNum + count}`;
+        existingProduct = await Product.findOne({ sku });
+        count++;
+    }
+
+    return sku;
+};
+
 // Tạo sản phẩm mới
 exports.createProduct = async (req, res) => {
     try {
         const sellerId = req.user.userId;
         const slug = await generateUniqueSlug(req.body.name);
+        const sku = await generateSKU(req.body.name, sellerId);
 
         const requiredFields = ['name', 'description', 'price', 'stock', 'category'];
         for (const field of requiredFields) {
@@ -36,6 +60,14 @@ exports.createProduct = async (req, res) => {
             return errorResponse(res, 'Giá sản phẩm phải là số dương', 400);
         }
 
+        const discount = Number(req.body.discount) || 0;
+        if (isNaN(discount) || discount < 0) {
+            return errorResponse(res, 'Giảm giá phải là số không âm', 400);
+        }
+        if (discount > price) {
+            return errorResponse(res, 'Giảm giá không được lớn hơn giá sản phẩm', 400);
+        }
+
         const stock = Number(req.body.stock);
         if (isNaN(stock) || stock < 0) {
             return errorResponse(res, 'Số lượng tồn kho phải là số không âm', 400);
@@ -46,6 +78,7 @@ exports.createProduct = async (req, res) => {
             seller: sellerId,
             name: req.body.name,
             slug,
+            sku,
             description: req.body.description,
             price: req.body.price,
             stock: req.body.stock,
@@ -81,6 +114,9 @@ exports.createProduct = async (req, res) => {
         if (error.code === 11000 && error.keyPattern?.slug) {
             return errorResponse(res, 'Slug sản phẩm đã tồn tại', 400);
         }
+        if (error.code === 11000 && error.keyPattern?.sku) {
+            return errorResponse(res, 'SKU sản phẩm đã tồn tại', 400);
+        }
 
         // Xử lý lỗi validation của Mongoose
         if (error.name === 'ValidationError') {
@@ -95,11 +131,33 @@ exports.createProduct = async (req, res) => {
 // Cập nhật sản phẩm
 exports.updateProduct = async (req, res) => {
     try {
-        const productId = req.params.id;
-        const userId = req.user._id;
+        const { slug } = req.params;
+        const userId = req.user.userId;
+        if (req.body.discount !== undefined) {
+            const discount = Number(req.body.discount);
+            if (isNaN(discount)) {
+                return errorResponse(res, 'Giảm giá phải là số', 400);
+            }
 
+            // Lấy giá hiện tại để so sánh
+            const currentProduct = await Product.findOne({ slug, seller: userId });
+            if (!currentProduct) {
+                return errorResponse(res, 'Không tìm thấy sản phẩm', 404);
+            }
+
+            const priceToCompare = req.body.price !== undefined
+                ? Number(req.body.price)
+                : currentProduct.price;
+
+            if (discount < 0) {
+                return errorResponse(res, 'Giảm giá phải là số không âm', 400);
+            }
+            if (discount > priceToCompare) {
+                return errorResponse(res, 'Giảm giá không được lớn hơn giá sản phẩm', 400);
+            }
+        }
         const updatedProduct = await Product.findOneAndUpdate(
-            { _id: productId, userId },
+            { slug: slug, seller: userId },
             { $set: req.body },
             { new: true }
         );
@@ -109,7 +167,7 @@ exports.updateProduct = async (req, res) => {
         await UserInteraction.create({
             userId,
             targetType: 'product',
-            targetId: productId,
+            targetId: updatedProduct._id,
             action: 'update',
             metadata: req.body
         });
@@ -120,46 +178,38 @@ exports.updateProduct = async (req, res) => {
     }
 };
 
-// Xóa mềm và Xóa cứng dựa vào query
+//Xóa sản phẩm
 exports.deleteProduct = async (req, res) => {
     try {
         const { productId } = req.params;
-        const { type = 'soft' } = req.query; // ?type=soft hoặc ?type=hard
-        const userId = req.user.userId;
-        const role = req.user.role;
 
         const product = await Product.findById(productId);
         if (!product) return errorResponse(res, 'Không tìm thấy sản phẩm', 404);
 
-        if (type === 'hard') {
-            await Product.findByIdAndDelete(productId);
-            return successResponse(res, 'Xóa vĩnh viễn sản phẩm thành công');
-        } else {
-            product.isActive = false;
-            await product.save();
-            return successResponse(res, 'Xóa mềm sản phẩm thành công', product);
-        }
+        await Product.findByIdAndDelete(productId);
+
+        return successResponse(res, 'Đã xóa sản phẩm khỏi hệ thống');
     } catch (error) {
         return errorResponse(res, 'Lỗi khi xóa sản phẩm', 500, error.message);
     }
 };
 
-// Khôi phục sản phẩm bị xóa mềm
-exports.restoreProduct = async (req, res) => {
+//Chuyển đổi trạng thái sản phẩm (đang bán hoặc ngừng bán)
+exports.toggleProductActiveStatus = async (req, res) => {
     try {
         const { productId } = req.params;
-        const userId = req.user.userId;
-        const role = req.user.role;
 
         const product = await Product.findById(productId);
         if (!product) return errorResponse(res, 'Không tìm thấy sản phẩm', 404);
 
-        product.isActive = true;
+        product.isActive = !product.isActive;
         await product.save();
 
-        return successResponse(res, 'Khôi phục sản phẩm thành công', product);
+        const statusText = product.isActive ? 'Sản phẩm đã được mở bán' : 'Sản phẩm đã ngừng bán';
+
+        return successResponse(res, statusText, { isActive: product.isActive, product });
     } catch (error) {
-        return errorResponse(res, 'Lỗi khôi phục sản phẩm', 500, error.message);
+        return errorResponse(res, 'Lỗi khi cập nhật trạng thái sản phẩm', 500, error.message);
     }
 };
 
@@ -259,7 +309,7 @@ exports.getSuggestedProducts = async (req, res) => {
 };
 
 // Lấy tất cả sản phẩm thuộc 1 shop (seller), sort mới nhất
-exports.getProductsByShop = async (req, res) => {
+exports.getProductsByShopForUser = async (req, res) => {
     const { seller } = req.params;
     const { page = 1, limit = 20 } = req.query;
 
@@ -282,5 +332,128 @@ exports.getProductsByShop = async (req, res) => {
         });
     } catch (err) {
         return errorResponse(res, 'Lỗi khi lấy sản phẩm theo shop', 500, err.message);
+    }
+};
+
+//Lấy chi tiết sản phẩm cho user
+exports.getProductDetailForUser = async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const userId = req.user?.userId;
+
+        // Lấy thông tin sản phẩm (chỉ sản phẩm đang bán)
+        const product = await Product.findOne({
+            slug: slug,
+            isActive: true
+        }).populate('seller', 'username avatar shopName');
+
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc sản phẩm đã ngừng bán', 404);
+        }
+
+        // Ghi lại hành vi xem sản phẩm nếu người dùng đã đăng nhập
+        if (userId) {
+            await UserInteraction.create({
+                userId,
+                targetType: 'product',
+                targetId: product._id,
+                action: 'view',
+                metadata: {
+                    category: product.category,
+                    price: product.price,
+                    tags: product.tags
+                }
+            });
+        }
+
+        return successResponse(res, 'Lấy thông tin sản phẩm thành công', product);
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi lấy thông tin sản phẩm', 500, error.message);
+    }
+};
+
+// Lấy tất cả sản phẩm thuộc 1 shop (seller), sort mới nhất
+exports.getProductsByShopForShop = async (req, res) => {
+    const { seller } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+
+    try {
+        const products = await Product.find({ seller: seller })
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(parseInt(limit));
+
+        const total = await Product.countDocuments({ seller: seller });
+
+        return successResponse(res, 'Lấy sản phẩm của shop thành công', {
+            products,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                totalPages: Math.ceil(total / limit)
+            }
+        });
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi lấy sản phẩm theo shop', 500, err.message);
+    }
+};
+
+//Lấy chi tiết sản phẩm cho seller
+exports.getProductDetailForSeller = async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const userId = req.user.userId;
+
+        // Lấy thông tin sản phẩm (bao gồm cả sản phẩm đã ngừng bán)
+        const product = await Product.findOne({
+            slug: slug,
+            seller: userId
+        }).populate('seller', 'username avatar shopName');
+
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền truy cập', 404);
+        }
+
+        return successResponse(res, 'Lấy thông tin sản phẩm thành công', product);
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi lấy thông tin sản phẩm', 500, error.message);
+    }
+};
+
+exports.getProductBySlug = async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const userId = req.user?.userId;
+
+        // Lấy thông tin sản phẩm (chỉ sản phẩm đang bán)
+        const product = await Product.findOne({
+            slug,
+            isActive: true
+        }).populate('seller', 'username avatar shopName');
+
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc sản phẩm đã ngừng bán', 404);
+        }
+
+        // Ghi lại hành vi xem sản phẩm nếu người dùng đã đăng nhập
+        if (userId) {
+            await UserInteraction.create({
+                userId,
+                targetType: 'product',
+                targetId: product._id,
+                action: 'view',
+                metadata: {
+                    category: product.category,
+                    price: product.price,
+                    tags: product.tags,
+                    via: 'slug_search' // Đánh dấu truy cập qua tìm kiếm slug
+                }
+            });
+        }
+
+        return successResponse(res, 'Lấy thông tin sản phẩm thành công', product);
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi lấy thông tin sản phẩm', 500, error.message);
     }
 };

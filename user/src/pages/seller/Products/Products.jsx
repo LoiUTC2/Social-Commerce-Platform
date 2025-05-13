@@ -6,11 +6,11 @@ import { Card, CardContent } from '../../../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '../../../components/ui/pagination';
-import { Package, Search, PlusCircle, Download, MoreVertical, Edit, Trash2, CheckCircle, XCircle, Eye } from 'lucide-react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../../components/ui/dropdown-menu';import { Badge } from '../../../components/ui/badge';
+import { Package, Search, PlusCircle, Download, MoreVertical, Edit, Trash2, CheckCircle, XCircle, Eye, RefreshCw, Copy } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../../components/ui/dropdown-menu'; import { Badge } from '../../../components/ui/badge';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { toast } from 'sonner';
-import { createProduct, deleteProduct, getAllProductsToShop } from '../../../services/productService';
+import { toggleProductActiveStatus, deleteProduct, getAllProductsToShopForSeller } from '../../../services/productService';
 import { useAuth } from '../../../contexts/AuthContext';
 
 // Format currency
@@ -23,7 +23,7 @@ const formatCurrency = (amount) => {
 
 export default function Products() {
   const navigate = useNavigate();
-  const {user, showLoginModal, setShowLoginModal} = useAuth();
+  const { user, setShowLoginModal } = useAuth();
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -36,13 +36,14 @@ export default function Products() {
     totalPages: 1,
   });
   const [loading, setLoading] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(null); //hiển thị loading khi đang cập nhật trạng thái
 
   // Lấy danh sách sản phẩm từ API
   const fetchProducts = async (page = 1) => {
     if (!user) return setShowLoginModal(true);
     setLoading(true);
     try {
-      const response = await getAllProductsToShop(user._id, {
+      const response = await getAllProductsToShopForSeller(user._id, {
         page,
         limit: pagination.limit,
       });
@@ -55,7 +56,7 @@ export default function Products() {
       });
     } catch (error) {
       toast('Lỗi',
-        {description: 'Không thể lấy danh sách sản phẩm. Vui lòng thử lại sau.',}
+        { description: 'Không thể lấy danh sách sản phẩm. Vui lòng thử lại sau.', }
       );
       console.error('Lỗi khi lấy sản phẩm:', error);
     } finally {
@@ -67,6 +68,33 @@ export default function Products() {
   useEffect(() => {
     fetchProducts(pagination.page);
   }, [pagination.page]);
+
+  // Handle refresh button
+  const handleRefresh = () => {
+    fetchProducts(pagination.page);
+    toast.info('Đã làm mới danh sách sản phẩm.');
+  };
+
+  // Handle status change for a product
+  const handleStatusChange = async (productId) => {
+    setUpdatingStatus(productId);
+    try {
+      const res = await toggleProductActiveStatus(productId);
+      const isActive = res.data.isActive;
+      toast.success('Thành công', {
+        description: `Cập nhật trạng thái sản phẩm thành ${isActive ? 'Đang bán' : 'Ngừng bán'}.`,
+      });
+      // Cập nhật lại danh sách sản phẩm
+      fetchProducts(pagination.page);
+    } catch (error) {
+      toast.error('Lỗi', {
+        description: 'Cập nhật trạng thái thất bại. Vui lòng thử lại sau.',
+      });
+      console.error('Lỗi khi cập nhật trạng thái:', error);
+    } finally {
+      setUpdatingStatus(null);
+    }
+  };
 
   // Handle selection of all products
   const handleSelectAll = (checked) => {
@@ -91,7 +119,7 @@ export default function Products() {
     const matchesSearch = searchQuery === '' ||
       product.name.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesCategory = filterCategory === 'all' || product.category === filterCategory;
+    const matchesCategory = filterCategory === 'all' || product.category.includes(filterCategory);
     const matchesStatus = filterStatus === 'all' || (filterStatus === 'active' ? product.isActive : !product.isActive);
 
     return matchesSearch && matchesCategory && matchesStatus;
@@ -107,7 +135,7 @@ export default function Products() {
   // Handle delete product
   const handleDeleteProduct = async (productId) => {
     try {
-      await deleteProduct(productId, 'soft');
+      await deleteProduct(productId, 'hard'); //xóa mất luôn khỏi db
       toast.success("Thành công", {
         description: 'Xóa sản phẩm thành công.',
       });
@@ -123,7 +151,7 @@ export default function Products() {
   // Handle delete selected products
   const handleDeleteSelected = async () => {
     try {
-      await Promise.all(selectedProducts.map(id => deleteProduct(id, 'soft')));
+      await Promise.all(selectedProducts.map(id => deleteProduct(id, 'hard')));
       toast.success("Thành công", {
         description: `Đã xóa ${selectedProducts.length} sản phẩm`,
       });
@@ -139,13 +167,28 @@ export default function Products() {
 
   // Danh mục sản phẩm từ backend (có thể gọi API để lấy, hiện tại dùng mock)
   const productCategories = [
-    'Thời trang nam',
-    'Thời trang nữ',
-    'Đồ điện tử',
-    'Đồ gia dụng',
-    'Sách & Văn phòng phẩm',
-    'Sức khỏe & Làm đẹp',
+    // 'Thời trang',
+    // 'Thời trang nữ',
+    // 'Đồ điện tử',
+    // 'Đồ gia dụng',
+    // 'Sách & Văn phòng phẩm',
+    // 'Sức khỏe & Làm đẹp',
+    "Điện thoại", "Laptop", "Tablet", "Phụ kiện", "Máy ảnh", "Thời trang", "Thể thao",
+    "Sneakers", "Đồng hồ", "Mỹ phẩm", "Nước hoa", "Đồ gia dụng", "Nội thất", "Công nghệ", "Gaming", "Đồ ăn",
+    "Đồ uống", "Sách", "Đồ chơi", "Xe cộ", "Âm thanh", "Máy tính bảng", "Flagship", "Nhiếp ảnh"
   ];
+  //Nay mai lấy API lấy ra catgory
+  // useEffect(() => {
+  //   const fetchCategories = async () => {
+  //     try {
+  //       const response = await api.get('/categories');
+  //       setProductCategories(response.data);
+  //     } catch (error) {
+  //       console.error('Lỗi khi lấy danh mục:', error);
+  //     }
+  //   };
+  //   fetchCategories();
+  // }, []);
 
   return (
     <div className="space-y-6">
@@ -198,6 +241,10 @@ export default function Products() {
                   <SelectItem value="inactive">Ngừng bán</SelectItem>
                 </SelectContent>
               </Select>
+
+              <Button variant="outline" size="sm" onClick={handleRefresh}>
+                <RefreshCw className="w-4 h-4 mr-2" /> Làm mới
+              </Button>
             </div>
           </div>
 
@@ -238,12 +285,12 @@ export default function Products() {
                     />
                   </TableHead>
                   <TableHead className="w-12">Ảnh</TableHead>
-                  <TableHead>Tên sản phẩm</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Giá bán</TableHead>
-                  <TableHead>Tồn kho</TableHead>
-                  <TableHead>Danh mục</TableHead>
-                  <TableHead>Trạng thái</TableHead>
+                  <TableHead className="max-w-[400px]">Tên sản phẩm</TableHead>
+                  <TableHead className="max-w-[150px]">SKU</TableHead>
+                  <TableHead className="max-w-[150px]">Giá bán</TableHead>
+                  <TableHead className="max-w-[100px]">Tồn kho</TableHead>
+                  <TableHead className="max-w-[150px]">Danh mục</TableHead>
+                  <TableHead className="max-w-[120px]">Trạng thái</TableHead>
                   <TableHead className="text-right">Thao tác</TableHead>
                 </TableRow>
               </TableHeader>
@@ -280,15 +327,26 @@ export default function Products() {
                           className="w-10 h-10 object-cover rounded-md"
                         />
                       </TableCell>
-                      <TableCell className="font-medium">{product.name}</TableCell>
-                      <TableCell className="text-sm text-gray-600">{product.sku || 'N/A'}</TableCell>
+                      <TableCell className="font-medium max-w-[400px] whitespace-normal break-words"><span title={product.name}>{product.name}</span></TableCell>
+                      <TableCell className="text-sm text-gray-600">{product.sku || 'N/A'}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(product.slug);
+                            toast.success('Đã sao chép mã SKU!');
+                          }}
+                        >
+                          <Copy className="w-2 h-2 mr-2" />
+                        </Button>
+                      </TableCell>
                       <TableCell>
                         {product.discount > 0 ? (
-                          <div>
+                          <div className="flex flex-col">
                             <span className="font-medium text-pink-600">
                               {formatCurrency(product.price - product.discount)}
                             </span>
-                            <span className="text-xs text-gray-500 line-through ml-1">
+                            <span className="text-xs text-gray-500 line-through">
                               {formatCurrency(product.price)}
                             </span>
                           </div>
@@ -302,19 +360,32 @@ export default function Products() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{product.category}</Badge>
+                        <Badge variant="outline">{product.category} </Badge>
                       </TableCell>
                       <TableCell>
-                        {product.isActive ? (
-                          <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
-                            <CheckCircle className="w-3 h-3 mr-1" /> Đang bán
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-gray-500">
-                            <XCircle className="w-3 h-3 mr-1" /> Ngừng bán
-                          </Badge>
-                        )}
+                        <Select
+                          value={product.isActive ? 'active' : 'inactive'}
+                          onValueChange={(newStatus) => handleStatusChange(product._id)}
+                          disabled={updatingStatus === product._id}
+                        >
+                          <SelectTrigger className="w-[120px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">
+                              <div className="flex items-center gap-1">
+                                <CheckCircle className="w-3 h-3 text-green-600" /> Đang bán
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="inactive">
+                              <div className="flex items-center gap-1">
+                                <XCircle className="w-3 h-3 text-gray-500" /> Ngừng bán
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
                       </TableCell>
+
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -323,10 +394,10 @@ export default function Products() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem className="flex items-center">
+                            <DropdownMenuItem className="flex items-center" onClick={() => navigate(`/seller/product-detail/${product.slug}`)}>
                               <Eye className="w-4 h-4 mr-2" /> Xem chi tiết
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="flex items-center">
+                            <DropdownMenuItem className="flex items-center" onClick={() => navigate(`/seller/edit-product/${product.slug}`)}>
                               <Edit className="w-4 h-4 mr-2" /> Chỉnh sửa
                             </DropdownMenuItem>
                             <DropdownMenuItem
