@@ -6,7 +6,7 @@ const userInteractionSchema = new mongoose.Schema({
   targetId: { type: mongoose.Schema.Types.ObjectId, required: true }, // id bài viết hoặc sản phẩm user đã tương tác, có thể là id_comment mà user đã reply
   action: { 
     type: String, 
-    enum: ['like', 'comment', 'share', 'click', 'view', 'save', 'purchase', 'follow', 'unfollow', 'search', 'create'], 
+    enum: ['like', 'comment', 'share', 'click', 'view', 'save', 'purchase', 'follow', 'unfollow', 'search', 'create', 'update'], 
     required: true 
   },
   metadata: { type: mongoose.Schema.Types.Mixed },

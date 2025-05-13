@@ -3,8 +3,7 @@ const router = express.Router();
 const shopController = require('../controllers/shopController');
 const { verifyToken, requireRole, checkShopOwnership } = require('../middleware/authMiddleware');
 
-// Bật chế độ người bán (chỉ user đã đăng nhập mới bật được)
-router.post('/activate-seller', verifyToken, shopController.activateSellerMode);
+router.post('/switchUserRole', verifyToken, shopController.switchUserRole); // chuyển tài khoản (vai trò)
 
 router.post('/', verifyToken, shopController.createShop);
 router.put('/', verifyToken, requireRole(['seller', 'admin']), checkShopOwnership, shopController.updateShop);

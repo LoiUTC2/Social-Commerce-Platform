@@ -2,6 +2,7 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const tokenService = require('../utils/tokenService');
+const { successResponse, errorResponse } = require('../utils/response');
 
 const sendTokenCookies = (res, accessToken, refreshToken) => {
     // Access Token
@@ -61,16 +62,19 @@ exports.login = async (req, res) => {
 
         sendTokenCookies(res, accessToken, refreshToken);
 
-        res.json({
+        const data = {
             accessToken,
             user: {
                 _id: user._id,
                 fullName: user.fullName,
                 email: user.email,
+                roles: user.roles,
                 role: user.role,
                 shopId: user.shopId,
+                isSellerActive: user.isSellerActive,
             }
-        });
+        };
+        successResponse(res, "Đăng nhập thành công.", data)
     } catch (err) {
         res.status(500).json({ message: 'Lỗi server', error: err.message });
     }
@@ -122,6 +126,7 @@ exports.refreshToken = async (req, res) => {
                 _id: user._id,
                 fullName: user.fullName,
                 email: user.email,
+                roles: user.roles,
                 role: user.role,
                 shopId: user.shopId,
             }

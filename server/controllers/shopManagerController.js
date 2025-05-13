@@ -23,7 +23,7 @@ exports.approveShop = async (req, res) => {
         await shop.save();
 
         // Cập nhật user
-        existingUser.role = 'seller';
+        existingUser.roles.push('seller');
         await existingUser.save();
 
         return successResponse(res, 'Shop đã được duyệt thành công', shop);

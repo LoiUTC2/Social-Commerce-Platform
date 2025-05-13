@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const Product = require('../models/Product');
 const Shop = require('../models/Shop');
+const Post = require('../models/Post');
 
 exports.verifyToken = (req, res, next) => {
     const token = req.cookies.accessToken; // Lấy từ cookie, tại vì có gửi accessToken qua cookie khi đăng nhập, nên lấy được
@@ -19,7 +20,7 @@ exports.verifyToken = (req, res, next) => {
 };
 
 // Chặn route nếu không đúng vai trò
-exports.requireRole = (roles = []) => {
+exports.requireRole = (roles = []) => {  //roles là danh sách vai trò được phép thực hiện hành động đó.
     if (typeof roles === "string") roles = [roles];
 
     return (req, res, next) => {
@@ -31,16 +32,27 @@ exports.requireRole = (roles = []) => {
 };
 
 exports.checkProductOwnership = async (req, res, next) => {
-    const productId = req.params.productId || req.body.productId;
+    const { slug, productId } = req.params; // Chỉ lấy từ req.params
     try {
-        const product = await Product.findById(productId);
-        if (!product) return res.status(404).json({ message: "Sản phẩm không tồn tại" });
+        let product;
+        if (slug) {
+            product = await Product.findOne({ slug });// Tìm sản phẩm bằng slug
+        } else if (productId) {
+            product = await Product.findById(productId); // Tìm sản phẩm bằng _id
+        } else {
+            return res.status(400).json({ message: "Thiếu slug hoặc productId" });
+        }
 
+        if (!product) {
+            return res.status(404).json({ message: "Sản phẩm không tồn tại" });
+        }
+
+        // Kiểm tra quyền sở hữu
         if (product.seller.toString() !== req.user.userId && req.user.role !== 'admin') {
             return res.status(403).json({ message: "Bạn không có quyền thao tác với sản phẩm này" });
         }
-        // Lưu sản phẩm vào req để controller dùng tiếp nếu cần
-        req.product = product;
+
+        req.product = product; // Lưu sản phẩm vào req để controller dùng tiếp nếu cần
         next();
     } catch (err) {
         return res.status(500).json({ message: "Lỗi máy chủ", error: err.message });
@@ -87,7 +99,7 @@ exports.checkShopOwnership = async (req, res, next) => {
     try {
         const shop = await Shop.findById(shopId);
         if (!shop) return res.status(404).json({ message: "Cửa hàng không tồn tại" });
-        
+
         // Nếu chưa được duyệt thì không cho thao tác
         if (!shop.isApproved) {
             return res.status(403).json({ message: 'Shop chưa được duyệt. Bạn chưa thể thực hiện thao tác này.' });

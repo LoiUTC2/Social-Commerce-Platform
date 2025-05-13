@@ -1,18 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { Textarea } from '../../../components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, } from '../../../components/ui/form';
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '../../../components/ui/form';
 import { Package, ArrowLeft, Upload, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { createProduct } from '../../../services/productService';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
-import { useAuth } from '../../../contexts/AuthContext';
+import { getDetailProductForSeller, updateProduct } from '../../../services/productService';
 import { uploadToCloudinary } from '../../../utils/uploadToCloudinary';
 
 // Schema validation với Yup
@@ -21,8 +20,8 @@ const schema = yup.object().shape({
     description: yup.string().trim().required('Mô tả sản phẩm là bắt buộc'),
     price: yup
         .number()
-        .nullable() // Cho phép null
-        .transform((value) => (value === null || value === '' ? undefined : Number(value))) // Chuyển null/rỗng thành undefined   
+        .nullable()
+        .transform((value) => (value === null || value === '' ? undefined : Number(value)))
         .required('Giá sản phẩm là bắt buộc')
         .positive('Giá phải là số dương'),
     stock: yup
@@ -58,31 +57,32 @@ const schema = yup.object().shape({
     ),
 });
 
-// Mock data cho danh mục sản phẩm
+// Mock data cho danh mục sản phẩm (lấy từ Product.js)
 const productCategories = [
     "Điện thoại", "Laptop", "Tablet", "Phụ kiện", "Máy ảnh", "Thời trang", "Thể thao",
     "Sneakers", "Đồng hồ", "Mỹ phẩm", "Nước hoa", "Đồ gia dụng", "Nội thất", "Công nghệ", "Gaming", "Đồ ăn",
     "Đồ uống", "Sách", "Đồ chơi", "Xe cộ", "Âm thanh", "Máy tính bảng", "Flagship", "Nhiếp ảnh"
 ];
 
-export default function AddProduct() {
-    const { user } = useAuth();
+export default function EditProduct() {
+    const { slug } = useParams();
     const navigate = useNavigate();
+    const [uploading, setUploading] = useState(false);
+    const [mediaFiles, setMediaFiles] = useState([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Khởi tạo form với React Hook Form và Yup
     const form = useForm({
         defaultValues: {
             name: '',
             description: '',
-            price: null, // Đặt giá trị ban đầu là số
-            discount: null, // Đặt giá trị ban đầu là số
-            stock: null, // Đặt giá trị ban đầu là số
+            price: null,
+            discount: null,
+            stock: null,
             category: '',
             brand: '',
             condition: 'new',
             tags: '',
-            images: [],
-            videos: [],
             variants: [],
             isActive: true,
         },
@@ -95,19 +95,58 @@ export default function AddProduct() {
         name: 'variants',
     });
 
-    // State cho xử lý upload ảnh
-    const [uploading, setUploading] = useState(false);
-    const [mediaFiles, setMediaFiles] = useState([]);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    // Cleanup URL preview khi component unmount
+    // Lấy dữ liệu sản phẩm khi component mount
     useEffect(() => {
-        return () => {
-            mediaFiles.forEach((image) => URL.revokeObjectURL(image.preview));
-        };
-    }, [mediaFiles]);
+        const fetchProduct = async () => {
+            try {
+                const response = await getDetailProductForSeller(slug);
+                const product = response.data;
 
-    // Xử lý upload ảnh
+                // Điền dữ liệu vào form
+                form.reset({
+                    name: product.name,
+                    description: product.description,
+                    price: product.price,
+                    discount: product.discount,
+                    stock: product.stock,
+                    category: product.category[0], // Lấy danh mục đầu tiên
+                    brand: product.brand || '',
+                    condition: product.condition,
+                    tags: product.tags.join(', '),
+                    variants: product.variants,
+                    isActive: product.isActive,
+                });
+
+                // Điền mediaFiles từ images và videos
+                const existingMedia = [
+                    ...product.images.map((url, index) => ({
+                        id: `existing-image-${index}`,
+                        preview: url,
+                        type: 'image',
+                    })),
+                    ...product.videos.map((url, index) => ({
+                        id: `existing-video-${index}`,
+                        preview: url,
+                        type: 'video',
+                    })),
+                ];
+                setMediaFiles(existingMedia);
+            } catch (error) {
+                toast.error('Lỗi', { description: 'Không thể lấy thông tin sản phẩm. Vui lòng thử lại sau.' });
+                console.error('Lỗi khi lấy chi tiết sản phẩm:', error);
+            }
+        };
+
+        fetchProduct();
+
+        return () => {
+            mediaFiles.forEach((media) => {
+                if (media.file) URL.revokeObjectURL(media.preview);
+            });
+        };
+    }, [slug]);
+
+    // Xử lý upload media
     const handleMediaChange = (e) => {
         const files = Array.from(e.target.files);
         const newMediaFiles = files.map((file) => ({
@@ -119,10 +158,12 @@ export default function AddProduct() {
         setMediaFiles((prev) => [...prev, ...newMediaFiles]);
     };
 
-    // Xử lý xóa ảnh
+    // Xử lý xóa media
     const removeMedia = (index) => {
         const updatedMediaFiles = [...mediaFiles];
-        URL.revokeObjectURL(updatedMediaFiles[index].preview);
+        if (updatedMediaFiles[index].file) {
+            URL.revokeObjectURL(updatedMediaFiles[index].preview);
+        }
         updatedMediaFiles.splice(index, 1);
         setMediaFiles(updatedMediaFiles);
     };
@@ -150,7 +191,7 @@ export default function AddProduct() {
     // Xử lý submit form
     const onSubmit = async (data) => {
         setIsSubmitting(true);
-
+        let message = '';
         try {
             const imageUrls = [];
             const videoUrls = [];
@@ -158,32 +199,35 @@ export default function AddProduct() {
             if (mediaFiles.length > 0) {
                 setUploading(true);
                 for (const media of mediaFiles) {
-                    const url = await uploadToCloudinary(media.file);
-                    if (media.type === 'image') imageUrls.push(url);
-                    else videoUrls.push(url);
+                    if (media.file) {
+                        const url = await uploadToCloudinary(media.file);
+                        if (media.type === 'image') imageUrls.push(url);
+                        else videoUrls.push(url);
+                    } else {
+                        if (media.type === 'image') imageUrls.push(media.preview);
+                        else videoUrls.push(media.preview);
+                    }
                 }
                 setUploading(false);
             }
 
-            // Chuẩn bị dữ liệu sản phẩm
             const productData = {
                 ...data,
                 price: data.price || 0,
                 discount: data.discount || 0,
                 stock: data.stock || 0,
                 tags: data.tags ? data.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
-                seller: user?._id,
+                category: [data.category], // Đảm bảo category là mảng
                 images: imageUrls,
                 videos: videoUrls,
             };
 
-            await createProduct(productData); // Gọi API tạo sản phẩm
-
-            toast.success('Thành công', { description: 'Thêm sản phẩm mới thành công' });
-
-            navigate('/seller/products');
+            const res = await updateProduct(slug, productData);
+            message = res.message;
+            toast.success('Thành công', { description: 'Cập nhật sản phẩm thành công' });
+            navigate(`/seller/product-detail/${slug}`);
         } catch (error) {
-            console.error('Lỗi khi thêm sản phẩm:', error);
+            console.error('Lỗi khi cập nhật sản phẩm:', error.message);
             if (error.message.includes('validation')) {
                 toast.error('Thất bại', { description: 'Vui lòng kiểm tra lại các trường nhập, đảm bảo giảm giá không lớn hơn giá bán.' });
             } else {
@@ -194,14 +238,13 @@ export default function AddProduct() {
         }
     };
 
-    // Xử lý quay lại trang danh sách
+    // Xử lý quay lại
     const handleGoBack = () => {
-        // Kiểm tra nếu form có thay đổi (isDirty)
-        if (form.formState.isDirty || mediaFiles.length > 0) {
+        if (form.formState.isDirty || mediaFiles.some((media) => media.file)) {
             const confirmLeave = window.confirm('Bạn đã thay đổi dữ liệu. Bạn có chắc muốn thoát mà không lưu?');
-            if (!confirmLeave) return; // Nếu người dùng không đồng ý, dừng lại
+            if (!confirmLeave) return;
         }
-        navigate('/seller/products');
+        navigate(`/seller/product-detail/${slug}`);
     };
 
     return (
@@ -212,7 +255,7 @@ export default function AddProduct() {
                         <ArrowLeft className="h-4 w-4" />
                     </Button>
                     <h1 className="text-2xl font-bold flex items-center gap-2">
-                        <Package className="w-6 h-6" /> Thêm sản phẩm mới
+                        <Package className="w-6 h-6" /> Chỉnh sửa sản phẩm
                     </h1>
                 </div>
 
@@ -222,23 +265,23 @@ export default function AddProduct() {
                     </Button>
                     <Button
                         type="submit"
-                        form="addProductForm"
+                        form="editProductForm"
                         className="bg-pink-500 hover:bg-pink-600 disabled:bg-pink-300 disabled:cursor-not-allowed"
                         disabled={isSubmitting || uploading}
                     >
-                        {isSubmitting || uploading ? 'Đang lưu...' : 'Lưu sản phẩm'}
+                        {isSubmitting || uploading ? 'Đang lưu...' : 'Lưu thay đổi'}
                     </Button>
                 </div>
             </div>
 
             <Form {...form}>
-                <form id="addProductForm" onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                <form id="editProductForm" onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Thông tin cơ bản */}
                         <Card className="col-span-2">
                             <CardHeader>
                                 <CardTitle>Thông tin sản phẩm</CardTitle>
-                                <CardDescription>Nhập thông tin chi tiết về sản phẩm của bạn</CardDescription>
+                                <CardDescription>Chỉnh sửa thông tin chi tiết về sản phẩm của bạn</CardDescription>
                             </CardHeader>
 
                             <CardContent className="space-y-4">
@@ -279,7 +322,7 @@ export default function AddProduct() {
                                     )}
                                 />
 
-                                {/* Giá*/}
+                                {/* Giá và số lượng */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <FormField
                                         control={form.control}
@@ -293,7 +336,7 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập giá (VNĐ)"
-                                                        value={field.value || ''} // Hiển thị rỗng nếu null
+                                                        value={field.value || ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
@@ -312,7 +355,7 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập giảm giá (VNĐ)"
-                                                        value={field.value || ''} // Hiển thị rỗng nếu null
+                                                        value={field.value || ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
@@ -322,7 +365,6 @@ export default function AddProduct() {
                                     />
                                 </div>
 
-                                {/* Số lượng */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <FormField
                                         control={form.control}
@@ -336,7 +378,7 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập số lượng"
-                                                        value={field.value || ''} // Hiển thị rỗng nếu null
+                                                        value={field.value || ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
@@ -434,7 +476,7 @@ export default function AddProduct() {
 
                         {/* Media và Biến thể */}
                         <div className="col-span-1 space-y-6">
-                            {/* Ảnh/video sản phẩm */}
+                            {/* Ảnh/Video sản phẩm */}
                             <Card>
                                 <CardHeader>
                                     <CardTitle>Hình ảnh/Video sản phẩm</CardTitle>
@@ -494,7 +536,7 @@ export default function AddProduct() {
                             <Card>
                                 <CardHeader>
                                     <CardTitle>Biến thể sản phẩm</CardTitle>
-                                    <CardDescription>Thêm các biến thể như màu sắc, kích cỡ...</CardDescription>
+                                    <CardDescription>Thêm hoặc chỉnh sửa các biến thể như màu sắc, kích cỡ...</CardDescription>
                                 </CardHeader>
 
                                 <CardContent className="space-y-4">
@@ -584,20 +626,6 @@ export default function AddProduct() {
                                 </CardContent>
                             </Card>
                         </div>
-                    </div>
-
-                    {/* Form Footer */}
-                    <div className="mt-6 flex items-center justify-end gap-2">
-                        <Button type="button" variant="outline" onClick={handleGoBack}>
-                            Hủy
-                        </Button>
-                        <Button
-                            type="submit"
-                            className="bg-pink-500 hover:bg-pink-600"
-                            disabled={isSubmitting || uploading}
-                        >
-                            {isSubmitting || uploading ? 'Đang lưu...' : 'Lưu sản phẩm'}
-                        </Button>
                     </div>
                 </form>
             </Form>

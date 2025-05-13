@@ -7,13 +7,13 @@ const { verifyToken, requireRole, checkProductOwnership} = require('../middlewar
 router.post('/', verifyToken,  requireRole(['seller', 'admin']), productController.createProduct);
 
 // Cập nhật sản phẩm
-router.put('/:id', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.updateProduct);
+router.put('/:slug', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.updateProduct);
 
 // Xóa sản phẩm
 router.delete('/:productId', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.deleteProduct);  // có query để xóa mềm (xóa theo kiểu thùng rác) và cứng
 
-// Khôi phục sản phẩm
-router.patch('/restore/:productId', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.restoreProduct);
+// Chuyển đổi trạng thái sản phẩm (đang bán hoặc ngừng bán)
+router.patch('/toggleStatus/:productId', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.toggleProductActiveStatus);
 
 // Lấy danh sách sản phẩm nổi bật (dựa vào soldCount và rating)
 router.get('/featured', productController.getFeaturedProducts);
@@ -21,7 +21,18 @@ router.get('/featured', productController.getFeaturedProducts);
 //Lấy danh sách sản phẩm gợi ý (dựa theo hành vi UserInteraction + random fallback)
 router.get('/suggested', productController.getSuggestedProducts);
 
-// Lấy tất cả sản phẩm thuộc 1 shop (seller), sort mới nhất
-router.get('/shop/:seller', productController.getProductsByShop);
+// Lấy tất cả sản phẩm thuộc 1 shop (seller) show lên sàn cho user xem, sort mới nhất
+router.get('/getAllForUser/:seller', productController.getProductsByShopForUser);
 
+// Lấy thông tin chi tiết sản phẩm (cho người dùng)
+router.get('/getDetailForUser/:slug', productController.getProductDetailForUser);
+
+// Lấy tất cả sản phẩm thuộc 1 shop (seller) show lên trang seller cho seller xem, sort mới nhất
+router.get('/getAllForSeller/:seller', productController.getProductsByShopForShop);
+
+// Lấy thông tin chi tiết sản phẩm (cho seller quản lý)
+router.get('/getDetailForSeller/:slug', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.getProductDetailForSeller);
+
+// Tìm kiếm sản phẩm bằng slug
+router.get('/slug/:slug', productController.getProductBySlug);
 module.exports = router;

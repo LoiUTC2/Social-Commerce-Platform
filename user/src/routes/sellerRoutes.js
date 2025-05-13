@@ -8,7 +8,8 @@ import Support from '../pages/seller/Support';
 import Marketing from '../pages/seller/Marketing';
 import Dashboard from '../pages/seller/Dashboard';
 import AddProduct from '../pages/seller/Products/AddProduct';
-
+import ProductDetail from '../pages/seller/Products/ProductDetail';
+import EditProduct from '../pages/seller/Products/EditProduct';
 
 const SellerRoutes = (
   <Route path="/seller" element={<DashboardLayout />}>
@@ -17,8 +18,11 @@ const SellerRoutes = (
     <Route path="orders" element={<Orders />} />
     <Route path="customers" element={<Customers />} />
     <Route path="store" element={<StoreInfo />} />
+
     <Route path="products" element={<Products />} />
     <Route path="add-product" element={<AddProduct />} />
+    <Route path="product-detail/:slug" element={<ProductDetail />} />
+    <Route path="edit-product/:slug" element={<EditProduct />} />
 
     <Route path="support" element={<Support />} />
     <Route path="marketing" element={<Marketing />} />

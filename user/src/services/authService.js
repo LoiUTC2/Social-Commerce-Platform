@@ -2,8 +2,9 @@ import api from '../utils/api';
 
 export const loginUser = async (email, password) => {
   const res = await api.post('/auth/login', { email, password });
-  const { accessToken, user } = res.data;
-  return { user };
+  const { accessToken, user } = res.data.data;
+  // console.log("api:", res.data.data); 
+  return { accessToken ,user };
 
   // Lưu accessToken vào localStorage
   // localStorage.setItem('accessToken', accessToken); // tại vì có lưu trong cookie rồi (ở dưới server lưu rồi), nên bây h ko cần lưu vào Storage nữa
@@ -34,4 +35,10 @@ export const logoutApi = async () => {
   const response = await api.post('/auth/logout');
   // localStorage.removeItem('accessToken');
   return response.data;
+};
+
+//Chuyển đổi tài khoản
+export const switchUserRole = async () => {
+  const response = await api.post('/shops/switchUserRole');
+  return response.data.data;
 };
