@@ -19,14 +19,17 @@ export const deleteProduct = async (productId) => {
 };
 
 // Chuyển đổi trạng thái sản phẩm (đang bán, ngừng bán)
-export const toggleProductActiveStatus = async (productId) => {
+export const toggleProductStatus = async (productId) => {
     const res = await api.patch(`/products/toggleStatus/${productId}`);
     return res.data;
 };
 
-// Lấy danh sách sản phẩm nổi bật
-export const getFeaturedProducts = async (page = 1, limit = 20) => {
-    const res = await api.get(`/products/featured?page=${page}&limit=${limit}`);
+// Lấy danh sách sản phẩm nổi bật (dựa vào rating và soldCount)
+export const getFeaturedProducts = async (page = 1, limit = 20, category = null) => {
+    const url = category
+        ? `/products/featured?page=${page}&limit=${limit}&category=${category}`
+        : `/products/featured?page=${page}&limit=${limit}`;
+    const res = await api.get(url);
     return res.data;
 };
 
@@ -36,26 +39,35 @@ export const getSuggestedProducts = async (page = 1, limit = 20) => {
     return res.data;
 };
 
-// Lấy danh sách sản phẩm của shop cho user xem trên sàn
-export const getAllProductsToShopForUser = async (seller, page = 1, limit = 20) => {
-    const res = await api.get(`/products/getAllForUser/${seller}?page=${page}&limit=${limit}`);
+// Lấy danh sách sản phẩm theo shop cho người dùng (sàn TMĐT)
+export const getProductsByShopForUser = async (sellerId, page = 1, limit = 20, sort = 'newest') => {
+    const res = await api.get(`/products/getAllForUser/${sellerId}?page=${page}&limit=${limit}&sort=${sort}`);
     return res.data;
 };
 
-// Lấy chi tiết sản phẩm cho user xem trên sàn
-export const getDetailProductForUser = async (slug) => {
+// Lấy danh sách sản phẩm theo shop cho seller quản lý (Trang quản lí người bán)
+export const getProductsByShopForSeller = async (sellerId, page = 1, limit = 20, sort = 'newest', status, search) => {
+    let url = `/products/getAllForSeller/${sellerId}?page=${page}&limit=${limit}&sort=${sort}`;
+    if (status) url += `&status=${status}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    const res = await api.get(url);
+    return res.data;
+};
+
+// Lấy chi tiết sản phẩm cho user 
+export const getProductDetailForUser = async (slug) => {
     const res = await api.get(`/products/getDetailForUser/${slug}`);
     return res.data;
 };
 
-// Lấy danh sách sản phẩm của shop cho seller xem trong trang seller
-export const getAllProductsToShopForSeller = async (seller, page = 1, limit = 20) => {
-    const res = await api.get(`/products/getAllForSeller/${seller}?page=${page}&limit=${limit}`);
+// Lấy chi tiết sản phẩm cho seller xem trong trang seller
+export const getProductDetailForSeller = async (slug) => {
+    const res = await api.get(`/products/getDetailForSeller/${slug}`);
     return res.data;
 };
 
-// Lấy chi tiết sản phẩm cho seller xem trong trang seller
-export const getDetailProductForSeller = async (slug) => {
-    const res = await api.get(`/products/getDetailForSeller/${slug}`);
+// Tìm sản phẩm theo slug (dạng rút gọn)
+export const getProductBySlug = async (slug) => {
+    const res = await api.get(`/products/slug/${slug}`);
     return res.data;
 };

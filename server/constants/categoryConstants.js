@@ -47,3 +47,11 @@ const SUB_CATEGORIES = {
 };
 
 module.exports = { MAIN_CATEGORIES, SUB_CATEGORIES };
+
+// category: {
+//         type: [String], required: true, enum: ["Điện thoại", "Laptop", "Tablet", "Phụ kiện", "Máy ảnh", "Thời trang", "Thể thao",
+//             "Sneakers", "Đồng hồ", "Mỹ phẩm", "Nước hoa", "Đồ gia dụng", "Nội thất", "Công nghệ", "Gaming", "Đồ ăn",
+//             "Đồ uống", "Sách", "Đồ chơi", "Xe cộ", "Âm thanh", "Máy tính bảng", "Flagship", "Nhiếp ảnh"]
+//     },
+// categoryParent: { type: String, required: true, enum: MAIN_CATEGORIES },
+// categoryChild: { type: String, required: true, enum: [].concat(...Object.values(SUB_CATEGORIES)) },

@@ -20,13 +20,13 @@ exports.search = async (req, res) => {
 
         switch (type) {
             case 'product':
-                results = await Product.find({ name: keyword, isDeleted: false, isApproved: true });
+                results = await Product.find({ name: keyword, isDeleted: false, isApprovedCreate: true });
                 break;
             case 'post':
                 results = await Post.find({ content: keyword, isDeleted: false });
                 break;
             case 'shop':
-                results = await Shop.find({ name: keyword, isDeleted: false, isApproved: true });
+                results = await Shop.find({ name: keyword, isDeleted: false, "status.isApprovedCreate": true });
                 break;
             case 'user':
                 results = await User.find({ fullName: keyword, isActive: true });
