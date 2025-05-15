@@ -101,7 +101,7 @@ exports.checkShopOwnership = async (req, res, next) => {
         if (!shop) return res.status(404).json({ message: "Cửa hàng không tồn tại" });
 
         // Nếu chưa được duyệt thì không cho thao tác
-        if (!shop.isApproved) {
+        if (!shop.status.isApprovedCreate) {
             return res.status(403).json({ message: 'Shop chưa được duyệt. Bạn chưa thể thực hiện thao tác này.' });
         }
 

@@ -2,10 +2,13 @@ const Product = require('../models/Product');
 const UserInteraction = require('../models/UserInteraction');
 const { successResponse, errorResponse } = require('../utils/response');
 const slugify = require("slugify");
+const mongoose = require('mongoose');
+const Category = require('../models/Category');
+
 
 //Tạo slug khác biệt
 const generateUniqueSlug = async (name) => {
-    let slug = slugify(name, { lower: true, strict: true });
+    let slug = slugify(name, { lower: true, strict: true, remove: /[*+~.()'"!:@]/g });
     let existingProduct = await Product.findOne({ slug });
     let count = 1;
 
@@ -45,10 +48,10 @@ const generateSKU = async (name, sellerId) => {
 exports.createProduct = async (req, res) => {
     try {
         const sellerId = req.user.userId;
-        const slug = await generateUniqueSlug(req.body.name);
-        const sku = await generateSKU(req.body.name, sellerId);
+        // const slug = await generateUniqueSlug(req.body.name);
+        // const sku = await generateSKU(req.body.name, sellerId);
 
-        const requiredFields = ['name', 'description', 'price', 'stock', 'category'];
+        const requiredFields = ['name', 'description', 'price', 'stock', 'mainCategory'];
         for (const field of requiredFields) {
             if (!req.body[field]) {
                 return errorResponse(res, `Thiếu trường bắt buộc: ${field}`, 400);
@@ -73,16 +76,22 @@ exports.createProduct = async (req, res) => {
             return errorResponse(res, 'Số lượng tồn kho phải là số không âm', 400);
         }
 
+        // Kiểm tra danh mục tồn tại
+        const mainCategory = await Category.findById(req.body.mainCategory);
+        if (!mainCategory) {
+            return errorResponse(res, 'Danh mục không tồn tại', 400);
+        }
+
         // Tạo sản phẩm mới với dữ liệu đã được validate
         const productData = {
             seller: sellerId,
             name: req.body.name,
-            slug,
-            sku,
+            // slug, //model tự tạo
+            // sku, // model tự tạo
             description: req.body.description,
             price: req.body.price,
             stock: req.body.stock,
-            category: req.body.category,
+            mainCategory: req.body.mainCategory,
             images: req.body.images || [],
             videos: req.body.videos || [],
             discount: req.body.discount || 0,
@@ -102,7 +111,7 @@ exports.createProduct = async (req, res) => {
             action: 'create',
             metadata: {
                 price: product.price,
-                category: product.category,
+                category: product.mainCategory,
                 brand: product.brand
             }
         });
@@ -110,12 +119,14 @@ exports.createProduct = async (req, res) => {
         return successResponse(res, 'Thêm sản phẩm thành công', product, 201);
 
     } catch (error) {
-        // Xử lý lỗi duplicate slug
-        if (error.code === 11000 && error.keyPattern?.slug) {
-            return errorResponse(res, 'Slug sản phẩm đã tồn tại', 400);
-        }
-        if (error.code === 11000 && error.keyPattern?.sku) {
-            return errorResponse(res, 'SKU sản phẩm đã tồn tại', 400);
+        // Xử lý lỗi duplicate slug hoặc SKU
+        if (error.code === 11000) {
+            if (error.keyPattern?.slug) {
+                return errorResponse(res, 'Slug sản phẩm đã tồn tại', 400);
+            }
+            if (error.keyPattern?.sku) {
+                return errorResponse(res, 'SKU sản phẩm đã tồn tại', 400);
+            }
         }
 
         // Xử lý lỗi validation của Mongoose
@@ -133,47 +144,90 @@ exports.updateProduct = async (req, res) => {
     try {
         const { slug } = req.params;
         const userId = req.user.userId;
-        if (req.body.discount !== undefined) {
-            const discount = Number(req.body.discount);
-            if (isNaN(discount)) {
-                return errorResponse(res, 'Giảm giá phải là số', 400);
+
+        // Tìm sản phẩm hiện tại để kiểm tra
+        const currentProduct = await Product.findOne({ slug, seller: userId });
+        if (!currentProduct) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền', 404);
+        }
+
+        const updateData = { ...req.body };
+
+        // Kiểm tra và xử lý các trường số
+        if (updateData.price !== undefined) {
+            const price = Number(updateData.price);
+            if (isNaN(price) || price <= 0) {
+                return errorResponse(res, 'Giá sản phẩm phải là số dương', 400);
             }
+        }
 
-            // Lấy giá hiện tại để so sánh
-            const currentProduct = await Product.findOne({ slug, seller: userId });
-            if (!currentProduct) {
-                return errorResponse(res, 'Không tìm thấy sản phẩm', 404);
-            }
-
-            const priceToCompare = req.body.price !== undefined
-                ? Number(req.body.price)
-                : currentProduct.price;
-
-            if (discount < 0) {
+        if (updateData.discount !== undefined) {
+            const discount = Number(updateData.discount);
+            if (isNaN(discount) || discount < 0) {
                 return errorResponse(res, 'Giảm giá phải là số không âm', 400);
             }
+
+            const priceToCompare = updateData.price !== undefined
+                ? Number(updateData.price)
+                : currentProduct.price;
+
             if (discount > priceToCompare) {
                 return errorResponse(res, 'Giảm giá không được lớn hơn giá sản phẩm', 400);
             }
         }
+
+        if (updateData.stock !== undefined) {
+            const stock = Number(updateData.stock);
+            if (isNaN(stock) || stock < 0) {
+                return errorResponse(res, 'Số lượng tồn kho phải là số không âm', 400);
+            }
+        }
+
+        // Kiểm tra danh mục nếu được cập nhật
+        if (updateData.mainCategory !== undefined) {
+            const mainCategory = await Category.findById(updateData.mainCategory);
+            if (!mainCategory) {
+                return errorResponse(res, 'Danh mục không tồn tại', 400);
+            }
+        }
+
         const updatedProduct = await Product.findOneAndUpdate(
-            { slug: slug, seller: userId },
-            { $set: req.body },
-            { new: true }
+            { slug, seller: userId },
+            { $set: updateData },
+            { new: true, runValidators: true }
         );
 
-        if (!updatedProduct) return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền', 404);
+        if (!updatedProduct) {
+            return errorResponse(res, 'Không thể cập nhật sản phẩm', 500);
+        }
 
+        // Ghi lại hành vi cập nhật sản phẩm
         await UserInteraction.create({
             userId,
             targetType: 'product',
             targetId: updatedProduct._id,
             action: 'update',
-            metadata: req.body
+            metadata: updateData
         });
 
         return successResponse(res, 'Cập nhật sản phẩm thành công', updatedProduct);
     } catch (error) {
+        // Xử lý lỗi duplicate
+        if (error.code === 11000) {
+            if (error.keyPattern?.slug) {
+                return errorResponse(res, 'Slug sản phẩm đã tồn tại', 400);
+            }
+            if (error.keyPattern?.sku) {
+                return errorResponse(res, 'SKU sản phẩm đã tồn tại', 400);
+            }
+        }
+
+        // Xử lý lỗi validation
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => err.message);
+            return errorResponse(res, 'Dữ liệu không hợp lệ', 400, errors);
+        }
+
         return errorResponse(res, 'Cập nhật sản phẩm thất bại', 500, error.message);
     }
 };
@@ -182,11 +236,27 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
     try {
         const { productId } = req.params;
+        const userId = req.user.userId;
 
-        const product = await Product.findById(productId);
-        if (!product) return errorResponse(res, 'Không tìm thấy sản phẩm', 404);
+        const product = await Product.findOne({
+            _id: productId,
+            seller: userId
+        });
 
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền xóa', 404);
+        }
+
+        // Xóa sản phẩm (middleware pre findOneAndDelete sẽ cập nhật productCount trong Category)
         await Product.findByIdAndDelete(productId);
+
+        // Ghi lại hành vi xóa sản phẩm
+        await UserInteraction.create({
+            userId,
+            targetType: 'product',
+            targetId: productId,
+            action: 'delete'
+        });
 
         return successResponse(res, 'Đã xóa sản phẩm khỏi hệ thống');
     } catch (error) {
@@ -198,14 +268,43 @@ exports.deleteProduct = async (req, res) => {
 exports.toggleProductActiveStatus = async (req, res) => {
     try {
         const { productId } = req.params;
+        const userId = req.user.userId;
 
-        const product = await Product.findById(productId);
-        if (!product) return errorResponse(res, 'Không tìm thấy sản phẩm', 404);
+        const product = await Product.findOne({
+            _id: productId,
+            seller: userId
+        });
 
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền thay đổi trạng thái', 404);
+        }
+
+        // Lưu trạng thái cũ để so sánh
+        const oldStatus = product.isActive;
+
+        // Cập nhật trạng thái
         product.isActive = !product.isActive;
         await product.save();
 
+        // Cập nhật số lượng sản phẩm trong danh mục nếu cần
+        if (oldStatus !== product.isActive) {
+            const increment = product.isActive ? 1 : -1;
+            await Category.findByIdAndUpdate(
+                product.mainCategory,
+                { $inc: { productCount: increment } }
+            );
+        }
+
         const statusText = product.isActive ? 'Sản phẩm đã được mở bán' : 'Sản phẩm đã ngừng bán';
+
+        // Ghi lại hoạt động
+        await UserInteraction.create({
+            userId,
+            targetType: 'product',
+            targetId: product._id,
+            action: 'toggle_status',
+            metadata: { isActive: product.isActive }
+        });
 
         return successResponse(res, statusText, { isActive: product.isActive, product });
     } catch (error) {
@@ -215,27 +314,38 @@ exports.toggleProductActiveStatus = async (req, res) => {
 
 // Lấy danh sách sản phẩm nổi bật (dựa vào soldCount và rating)
 exports.getFeaturedProducts = async (req, res) => {
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, category } = req.query;
+    const parsedLimit = parseInt(limit);
+    const skipCount = (parseInt(page) - 1) * parsedLimit;
 
     try {
-        const products = await Product.find({ isActive: true })
-            .sort({ 'ratings.avg': -1, soldCount: -1 })
-            .skip((page - 1) * limit)
-            .limit(parseInt(limit));
+        const query = { isActive: true };
 
-        const total = await Product.countDocuments({ isActive: true });
+        // Lọc theo danh mục nếu có
+        if (category) {
+            query.categories = mongoose.Types.ObjectId(category);
+        }
+
+        const products = await Product.find(query)
+            .populate('mainCategory', 'name slug')
+            .populate('seller', 'username shopName avatar')
+            .sort({ 'ratings.avg': -1, soldCount: -1 })
+            .skip(skipCount)
+            .limit(parsedLimit);
+
+        const total = await Product.countDocuments(query);
 
         return successResponse(res, "Danh sách sản phẩm nổi bật", {
             products,
             pagination: {
                 page: parseInt(page),
-                limit: parseInt(limit),
+                limit: parsedLimit,
                 total,
-                totalPages: Math.ceil(total / limit)
+                totalPages: Math.ceil(total / parsedLimit)
             }
         });
     } catch (err) {
-        return errorResponse(res, "Lỗi khi lấy sản phẩm nổi bật", 500, err);
+        return errorResponse(res, "Lỗi khi lấy sản phẩm nổi bật", 500, err.message);
     }
 };
 
@@ -243,13 +353,15 @@ exports.getFeaturedProducts = async (req, res) => {
 exports.getSuggestedProducts = async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
     const userId = req.user?.userId;
+    const parsedLimit = parseInt(limit);
+    const skipCount = (parseInt(page) - 1) * parsedLimit;
 
     try {
         let products;
         let total;
 
         if (userId) {
-            // Lấy các tags từ sản phẩm mà user đã xem, like, purchase,...
+            // Lấy các danh mục và tags từ sản phẩm mà user đã tương tác
             const interactions = await UserInteraction.find({
                 userId,
                 targetType: 'product',
@@ -261,73 +373,150 @@ exports.getSuggestedProducts = async (req, res) => {
             const interactedProducts = await Product.find({ _id: { $in: productIds } });
 
             const tagSet = new Set();
-            interactedProducts.forEach(p => p.tags?.forEach(tag => tagSet.add(tag)));
+            const categorySet = new Set();
 
-            // Tìm các sản phẩm có cùng tags
+            interactedProducts.forEach(p => {
+                p.tags?.forEach(tag => tagSet.add(tag));
+                p.categories?.forEach(cat => categorySet.add(cat.toString()));
+            });
+
+            // Tìm các sản phẩm có cùng tags hoặc categories
             products = await Product.find({
                 isActive: true,
-                tags: { $in: Array.from(tagSet) }
+                $or: [
+                    { tags: { $in: Array.from(tagSet) } },
+                    { categories: { $in: Array.from(categorySet).map(id => mongoose.Types.ObjectId(id)) } }
+                ],
+                _id: { $nin: productIds } // Loại bỏ các sản phẩm đã tương tác
             })
+                .populate('mainCategory', 'name slug')
+                .populate('seller', 'username shopName avatar')
                 .sort({ 'ratings.avg': -1, soldCount: -1 })
-                .skip((page - 1) * limit)
-                .limit(parseInt(limit));
+                .skip(skipCount)
+                .limit(parsedLimit);
 
             total = await Product.countDocuments({
                 isActive: true,
-                tags: { $in: Array.from(tagSet) }
+                $or: [
+                    { tags: { $in: Array.from(tagSet) } },
+                    { categories: { $in: Array.from(categorySet).map(id => mongoose.Types.ObjectId(id)) } }
+                ],
+                _id: { $nin: productIds }
             });
 
             // Nếu không đủ sản phẩm, fallback sang random
-            if (products.length < limit) {
+            if (products.length < parsedLimit) {
                 const extraProducts = await Product.aggregate([
-                    { $match: { isActive: true } },
-                    { $sample: { size: limit - products.length } }
+                    {
+                        $match: {
+                            isActive: true,
+                            _id: { $nin: [...productIds, ...products.map(p => p._id)] }
+                        }
+                    },
+                    { $sample: { size: parsedLimit - products.length } }
                 ]);
-                products = products.concat(extraProducts);
+
+                // Populate các trường cần thiết cho các sản phẩm từ aggregation
+                if (extraProducts.length > 0) {
+                    const extraProductIds = extraProducts.map(p => p._id);
+                    const populatedExtra = await Product.find({ _id: { $in: extraProductIds } })
+                        .populate('mainCategory', 'name slug')
+                        .populate('seller', 'username shopName avatar');
+
+                    products = [...products, ...populatedExtra];
+                }
             }
         } else {
-            // Fallback cho khách (random)
-            products = await Product.aggregate([
-                { $match: { isActive: true } },
-                { $sample: { size: parseInt(limit) } }
+            // Fallback cho khách (random + featured mix)
+            const featuredProducts = await Product.find({ isActive: true })
+                .populate('mainCategory', 'name slug')
+                .populate('seller', 'username shopName avatar')
+                .sort({ 'ratings.avg': -1, soldCount: -1 })
+                .limit(parsedLimit / 2);
+
+            const randomProducts = await Product.aggregate([
+                {
+                    $match: {
+                        isActive: true,
+                        _id: { $nin: featuredProducts.map(p => p._id) }
+                    }
+                },
+                { $sample: { size: parsedLimit - featuredProducts.length } }
             ]);
-            total = products.length;
+
+            // Populate cho randomProducts
+            const randomProductIds = randomProducts.map(p => p._id);
+            const populatedRandom = await Product.find({ _id: { $in: randomProductIds } })
+                .populate('mainCategory', 'name slug')
+                .populate('seller', 'username shopName avatar');
+
+            products = [...featuredProducts, ...populatedRandom];
+            total = await Product.countDocuments({ isActive: true });
         }
 
         return successResponse(res, "Gợi ý sản phẩm dành cho bạn", {
             products,
             pagination: {
                 page: parseInt(page),
-                limit: parseInt(limit),
+                limit: parsedLimit,
                 total,
-                totalPages: Math.ceil(total / limit)
+                totalPages: Math.ceil(total / parsedLimit)
             }
         });
     } catch (err) {
-        return errorResponse(res, "Lỗi khi lấy sản phẩm gợi ý", 500, err);
+        return errorResponse(res, "Lỗi khi lấy sản phẩm gợi ý", 500, err.message);
     }
 };
 
-// Lấy tất cả sản phẩm thuộc 1 shop (seller), sort mới nhất
+// Lấy tất cả sản phẩm thuộc 1 shop (seller) hiển thị cho user
 exports.getProductsByShopForUser = async (req, res) => {
     const { seller } = req.params;
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, sort = 'newest' } = req.query;
+    const parsedLimit = parseInt(limit);
+    const skipCount = (parseInt(page) - 1) * parsedLimit;
 
     try {
-        const products = await Product.find({ seller: seller, isActive: true })
-            .sort({ createdAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(parseInt(limit));
+        // Xác định cách sắp xếp
+        let sortOption = {};
+        switch (sort) {
+            case 'price_asc':
+                sortOption = { price: 1 };
+                break;
+            case 'price_desc':
+                sortOption = { price: -1 };
+                break;
+            case 'popular':
+                sortOption = { soldCount: -1 };
+                break;
+            case 'rating':
+                sortOption = { 'ratings.avg': -1 };
+                break;
+            case 'newest':
+            default:
+                sortOption = { createdAt: -1 };
+        }
 
-        const total = await Product.countDocuments({ seller: seller, isActive: true });
+        const products = await Product.find({
+            seller: seller,
+            isActive: true
+        })
+            .populate('mainCategory', 'name slug')
+            .sort(sortOption)
+            .skip(skipCount)
+            .limit(parsedLimit);
+
+        const total = await Product.countDocuments({
+            seller: seller,
+            isActive: true
+        });
 
         return successResponse(res, 'Lấy sản phẩm của shop thành công', {
             products,
             pagination: {
                 page: parseInt(page),
-                limit: parseInt(limit),
+                limit: parsedLimit,
                 total,
-                totalPages: Math.ceil(total / limit)
+                totalPages: Math.ceil(total / parsedLimit)
             }
         });
     } catch (err) {
@@ -345,11 +534,24 @@ exports.getProductDetailForUser = async (req, res) => {
         const product = await Product.findOne({
             slug: slug,
             isActive: true
-        }).populate('seller', 'username avatar shopName');
+        })
+            .populate('seller', 'username avatar shopName')
+            .populate('mainCategory', 'name slug')
+            .populate('categories', 'name slug');
 
         if (!product) {
             return errorResponse(res, 'Không tìm thấy sản phẩm hoặc sản phẩm đã ngừng bán', 404);
         }
+
+        // Lấy sản phẩm liên quan (cùng danh mục)
+        const relatedProducts = await Product.find({
+            mainCategory: product.mainCategory,
+            _id: { $ne: product._id },
+            isActive: true
+        })
+            .populate('seller', 'username shopName')
+            .sort({ 'ratings.avg': -1 })
+            .limit(6);
 
         // Ghi lại hành vi xem sản phẩm nếu người dùng đã đăng nhập
         if (userId) {
@@ -359,39 +561,101 @@ exports.getProductDetailForUser = async (req, res) => {
                 targetId: product._id,
                 action: 'view',
                 metadata: {
-                    category: product.category,
+                    mainCategory: product.mainCategory,
+                    categories: product.categories,
                     price: product.price,
                     tags: product.tags
                 }
             });
         }
 
-        return successResponse(res, 'Lấy thông tin sản phẩm thành công', product);
+        return successResponse(res, 'Lấy thông tin sản phẩm thành công', {
+            product,
+            relatedProducts
+        });
     } catch (error) {
         return errorResponse(res, 'Lỗi khi lấy thông tin sản phẩm', 500, error.message);
     }
 };
 
-// Lấy tất cả sản phẩm thuộc 1 shop (seller), sort mới nhất
+// Lấy tất cả sản phẩm thuộc 1 shop (seller) hiển thị cho seller
 exports.getProductsByShopForShop = async (req, res) => {
     const { seller } = req.params;
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, status, sort = 'newest', search } = req.query;
+    const parsedLimit = parseInt(limit);
+    const skipCount = (parseInt(page) - 1) * parsedLimit;
+    const userId = req.user.userId;
+
+    // Kiểm tra quyền truy cập
+    if (seller !== userId && req.user.role !== 'admin') {
+        return errorResponse(res, 'Không có quyền truy cập vào danh sách sản phẩm này', 403);
+    }
 
     try {
-        const products = await Product.find({ seller: seller })
-            .sort({ createdAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(parseInt(limit));
+        // Xây dựng query
+        const query = { seller: seller };
 
-        const total = await Product.countDocuments({ seller: seller });
+        // Lọc theo trạng thái nếu có
+        if (status === 'active') {
+            query.isActive = true;
+        } else if (status === 'inactive') {
+            query.isActive = false;
+        }
+
+        // Tìm kiếm theo tên hoặc mô tả nếu có
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { description: { $regex: search, $options: 'i' } },
+                { sku: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        // Xác định cách sắp xếp
+        let sortOption = {};
+        switch (sort) {
+            case 'price_asc':
+                sortOption = { price: 1 };
+                break;
+            case 'price_desc':
+                sortOption = { price: -1 };
+                break;
+            case 'popular':
+                sortOption = { soldCount: -1 };
+                break;
+            case 'rating':
+                sortOption = { 'ratings.avg': -1 };
+                break;
+            case 'newest':
+            default:
+                sortOption = { createdAt: -1 };
+        }
+
+        const products = await Product.find(query)
+            .populate('mainCategory', 'name slug')
+            .sort(sortOption)
+            .skip(skipCount)
+            .limit(parsedLimit);
+
+        const total = await Product.countDocuments(query);
+
+        // Thống kê tổng quan
+        const stats = {
+            total,
+            active: await Product.countDocuments({ seller, isActive: true }),
+            inactive: await Product.countDocuments({ seller, isActive: false }),
+            outOfStock: await Product.countDocuments({ seller, stock: 0 }),
+            lowStock: await Product.countDocuments({ seller, stock: { $gt: 0, $lte: 5 } })
+        };
 
         return successResponse(res, 'Lấy sản phẩm của shop thành công', {
             products,
+            stats,
             pagination: {
                 page: parseInt(page),
-                limit: parseInt(limit),
+                limit: parsedLimit,
                 total,
-                totalPages: Math.ceil(total / limit)
+                totalPages: Math.ceil(total / parsedLimit)
             }
         });
     } catch (err) {
@@ -409,18 +673,35 @@ exports.getProductDetailForSeller = async (req, res) => {
         const product = await Product.findOne({
             slug: slug,
             seller: userId
-        }).populate('seller', 'username avatar shopName');
+        })
+            .populate('seller', 'username avatar shopName')
+            .populate('mainCategory', 'name slug')
+            .populate('categories', 'name slug')
+            .populate('categoryPath', 'name slug');
 
         if (!product) {
             return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền truy cập', 404);
         }
 
-        return successResponse(res, 'Lấy thông tin sản phẩm thành công', product);
+        // Thống kê hiệu suất sản phẩm (có thể mở rộng)
+        const stats = {
+            views: await UserInteraction.countDocuments({
+                targetId: product._id,
+                action: 'view'
+            }),
+            purchases: await UserInteraction.countDocuments({
+                targetId: product._id,
+                action: 'purchase'
+            })
+        };
+
+        return successResponse(res, 'Lấy thông tin sản phẩm thành công', { product, stats });
     } catch (error) {
         return errorResponse(res, 'Lỗi khi lấy thông tin sản phẩm', 500, error.message);
     }
 };
 
+//  * Tìm kiếm sản phẩm bằng slug
 exports.getProductBySlug = async (req, res) => {
     try {
         const { slug } = req.params;
@@ -430,7 +711,10 @@ exports.getProductBySlug = async (req, res) => {
         const product = await Product.findOne({
             slug,
             isActive: true
-        }).populate('seller', 'username avatar shopName');
+        })
+            .populate('seller', 'username avatar shopName')
+            .populate('mainCategory', 'name slug')
+            .populate('categories', 'name slug');
 
         if (!product) {
             return errorResponse(res, 'Không tìm thấy sản phẩm hoặc sản phẩm đã ngừng bán', 404);
@@ -444,10 +728,11 @@ exports.getProductBySlug = async (req, res) => {
                 targetId: product._id,
                 action: 'view',
                 metadata: {
-                    category: product.category,
+                    mainCategory: product.mainCategory,
+                    categories: product.categories,
                     price: product.price,
                     tags: product.tags,
-                    via: 'slug_search' // Đánh dấu truy cập qua tìm kiếm slug
+                    via: 'slug_search'
                 }
             });
         }

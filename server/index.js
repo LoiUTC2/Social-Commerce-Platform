@@ -20,6 +20,7 @@ const postRoutes = require('./routes/postRoutes');
 const socialRoutes = require('./routes/postInteractionRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const productRoutes = require('./routes/productRoutes')
+const categoryRoutes = require('./routes/categoryRoutes')
 const shopRoutes = require('./routes/shopRoutes')
 
 const shopManagerRoutes = require('./routes/shopManagerRoutes');
@@ -32,6 +33,7 @@ app.use('/api/interactions', interactionRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/postInteraction', socialRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
 app.use('/api/shops', shopRoutes);
 
 app.use('/api/admin/shops', shopManagerRoutes); //quản lí duyệt shop đăng kí

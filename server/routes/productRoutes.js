@@ -19,20 +19,20 @@ router.patch('/toggleStatus/:productId', verifyToken, requireRole(['seller', 'ad
 router.get('/featured', productController.getFeaturedProducts);
 
 //Lấy danh sách sản phẩm gợi ý (dựa theo hành vi UserInteraction + random fallback)
-router.get('/suggested', productController.getSuggestedProducts);
+router.get('/suggested', verifyToken, productController.getSuggestedProducts);
 
 // Lấy tất cả sản phẩm thuộc 1 shop (seller) show lên sàn cho user xem, sort mới nhất
 router.get('/getAllForUser/:seller', productController.getProductsByShopForUser);
 
 // Lấy thông tin chi tiết sản phẩm (cho người dùng)
-router.get('/getDetailForUser/:slug', productController.getProductDetailForUser);
+router.get('/getDetailForUser/:slug', verifyToken, productController.getProductDetailForUser);
 
 // Lấy tất cả sản phẩm thuộc 1 shop (seller) show lên trang seller cho seller xem, sort mới nhất
-router.get('/getAllForSeller/:seller', productController.getProductsByShopForShop);
+router.get('/getAllForSeller/:seller', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.getProductsByShopForShop);
 
 // Lấy thông tin chi tiết sản phẩm (cho seller quản lý)
 router.get('/getDetailForSeller/:slug', verifyToken, requireRole(['seller', 'admin']), checkProductOwnership, productController.getProductDetailForSeller);
 
 // Tìm kiếm sản phẩm bằng slug
-router.get('/slug/:slug', productController.getProductBySlug);
+router.get('/slug/:slug', verifyToken, productController.getProductBySlug);
 module.exports = router;
