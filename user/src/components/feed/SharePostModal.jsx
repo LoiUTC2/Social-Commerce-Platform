@@ -94,7 +94,7 @@ const SharePostModal = ({ open, onOpenChange, post, postIdToShare, onShareComple
                 {/* Avatar người dùng */}
                 <div className="flex items-center gap-3 mb-1">
                     <img
-                        src={ramos}
+                        src={user?.avatar}
                         alt="avatar"
                         className="w-10 h-10 rounded-full object-cover"
                     />

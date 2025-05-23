@@ -3,7 +3,7 @@ const Category = require('./Category');
 
 const shopSchema = new mongoose.Schema({
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', required: true },
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller' }, //Có hoặc không cũng được, vì trong User cũng có sellerId rồi, để như này lấy ra sài cho dễ
     name: { type: String, required: true, trim: true, maxlength: 100 },
     slug: { type: String, unique: true },
     description: { type: String, default: '' },
@@ -82,7 +82,7 @@ const shopSchema = new mongoose.Schema({
         mainCategory: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true }, // Danh mục chính của shop
         subCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }], // Danh mục con mà shop kinh doanh
         brands: [{ type: String }], // Các thương hiệu
-        productRestrictions: [{ type: String }] // Hạn chế sản phẩm
+        productRestrictions: [{ type: String }] // Hạn chế sản phẩm,  sản phẩm mà cửa hàng không được phép hoặc không muốn kinh doanh.
     },
 
     // Thông tin SEO
@@ -140,6 +140,100 @@ const shopSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 
 }, { timestamps: true });
+
+// Function to create slug from shop name
+function createSlug(text) {
+    if (!text) return '';
+    
+    return text
+        .toLowerCase()
+        .trim()
+        // Remove Vietnamese accents
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        // Replace special characters with hyphens
+        .replace(/[^a-z0-9\s-]/g, '')
+        // Replace spaces and multiple spaces with single hyphen
+        .replace(/\s+/g, '-')
+        // Remove multiple consecutive hyphens
+        .replace(/-+/g, '-')
+        // Remove leading and trailing hyphens
+        .replace(/^-+|-+$/g, '');
+}
+
+// Function to ensure unique slug
+async function generateUniqueSlug(baseSlug, shopId = null) {
+    let slug = baseSlug;
+    let counter = 1;
+    
+    while (true) {
+        // Check if slug exists (excluding current shop if updating)
+        const query = { slug: slug };
+        if (shopId) {
+            query._id = { $ne: shopId };
+        }
+        
+        const existingShop = await mongoose.model('Shop').findOne(query);
+        
+        if (!existingShop) {
+            return slug;
+        }
+        
+        // If slug exists, append counter
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+    }
+}
+
+// Pre-save middleware to generate slug
+shopSchema.pre('save', async function(next) {
+    try {
+        // Only generate slug if name exists and (slug doesn't exist or name has changed)
+        if (this.name && (!this.slug || this.isModified('name'))) {
+            const baseSlug = createSlug(this.name);
+            
+            if (baseSlug) {
+                this.slug = await generateUniqueSlug(baseSlug, this._id);
+            }
+        }
+        
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Pre-update middleware for findOneAndUpdate
+shopSchema.pre(['findOneAndUpdate', 'updateOne'], async function(next) {
+    try {
+        const update = this.getUpdate();
+        
+        // Check if name is being updated
+        if (update.name || (update.$set && update.$set.name)) {
+            const newName = update.name || update.$set.name;
+            
+            if (newName) {
+                const baseSlug = createSlug(newName);
+                
+                if (baseSlug) {
+                    // Get the document being updated to exclude it from uniqueness check
+                    const docId = this.getQuery()._id;
+                    const uniqueSlug = await generateUniqueSlug(baseSlug, docId);
+                    
+                    if (update.$set) {
+                        update.$set.slug = uniqueSlug;
+                    } else {
+                        update.slug = uniqueSlug;
+                    }
+                }
+            }
+        }
+        
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
 
 // Tự thêm số lượng shop bán sản phẩm đang thuộc danh mục sản phẩm nào đó (shopCount),Khi shop được duyệt (chuyển từ pending → approved)
 shopSchema.post('save', async function (doc, next) {

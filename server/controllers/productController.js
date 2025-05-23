@@ -47,9 +47,10 @@ const generateSKU = async (name, sellerId) => {
 // Tạo sản phẩm mới
 exports.createProduct = async (req, res) => {
     try {
-        const sellerId = req.user.userId;
-        // const slug = await generateUniqueSlug(req.body.name);
-        // const sku = await generateSKU(req.body.name, sellerId);
+        const sellerId = req.actor._id.toString(); //này là 1 shopId nhé, có middle ware check hết rồi nên bây giờ chắc chắn là seller(dùng shopId), còn model seller chỉ là thông tin bổ trợ cho shop thôi
+
+        const slug = await generateUniqueSlug(req.body.name);
+        const sku = await generateSKU(req.body.name, sellerId);
 
         const requiredFields = ['name', 'description', 'price', 'stock', 'mainCategory'];
         for (const field of requiredFields) {
@@ -78,6 +79,8 @@ exports.createProduct = async (req, res) => {
 
         // Kiểm tra danh mục tồn tại
         const mainCategory = await Category.findById(req.body.mainCategory);
+        console.log('mainCategory:', sellerId);
+        console.log('mainCategory:', req.body.mainCategory);
         if (!mainCategory) {
             return errorResponse(res, 'Danh mục không tồn tại', 400);
         }
@@ -86,8 +89,8 @@ exports.createProduct = async (req, res) => {
         const productData = {
             seller: sellerId,
             name: req.body.name,
-            // slug, //model tự tạo
-            // sku, // model tự tạo
+            // slug, //model tự tạo 
+            sku: sku, // model tự tạo
             description: req.body.description,
             price: req.body.price,
             stock: req.body.stock,
@@ -98,14 +101,18 @@ exports.createProduct = async (req, res) => {
             brand: req.body.brand,
             condition: req.body.condition || 'new',
             variants: req.body.variants || [],
-            tags: req.body.tags || []
+            tags: req.body.tags || [],
+            isActive: true,
         };
 
         const product = await Product.create(productData);
 
         // Ghi lại hành vi tạo sản phẩm để phân tích sau này
         await UserInteraction.create({
-            userId: sellerId,
+            author: {
+                type: "Shop",
+                _id: sellerId
+            },
             targetType: 'product',
             targetId: product._id,
             action: 'create',
@@ -143,7 +150,7 @@ exports.createProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
     try {
         const { slug } = req.params;
-        const userId = req.user.userId;
+        const userId = req.actor._id.toString(); //người dùng lúc này là tài khoản seller nhé (dùng ShopId)
 
         // Tìm sản phẩm hiện tại để kiểm tra
         const currentProduct = await Product.findOne({ slug, seller: userId });
@@ -203,7 +210,10 @@ exports.updateProduct = async (req, res) => {
 
         // Ghi lại hành vi cập nhật sản phẩm
         await UserInteraction.create({
-            userId,
+            author: {
+                type: "Shop",
+                _id: userId
+            },
             targetType: 'product',
             targetId: updatedProduct._id,
             action: 'update',
@@ -236,7 +246,7 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
     try {
         const { productId } = req.params;
-        const userId = req.user.userId;
+        const userId = req.actor._id.toString();
 
         const product = await Product.findOne({
             _id: productId,
@@ -252,7 +262,10 @@ exports.deleteProduct = async (req, res) => {
 
         // Ghi lại hành vi xóa sản phẩm
         await UserInteraction.create({
-            userId,
+            author: {
+                type: "Shop",
+                _id: userId
+            },
             targetType: 'product',
             targetId: productId,
             action: 'delete'
@@ -268,7 +281,7 @@ exports.deleteProduct = async (req, res) => {
 exports.toggleProductActiveStatus = async (req, res) => {
     try {
         const { productId } = req.params;
-        const userId = req.user.userId;
+        const userId = req.actor._id.toString();
 
         const product = await Product.findOne({
             _id: productId,
@@ -298,13 +311,15 @@ exports.toggleProductActiveStatus = async (req, res) => {
         const statusText = product.isActive ? 'Sản phẩm đã được mở bán' : 'Sản phẩm đã ngừng bán';
 
         // Ghi lại hoạt động
-        await UserInteraction.create({
-            userId,
-            targetType: 'product',
-            targetId: product._id,
-            action: 'toggle_status',
-            metadata: { isActive: product.isActive }
-        });
+        // await UserInteraction.create({
+        //     author: {
+        //         type: "Shop",
+        //         _id: userId
+        //     }, targetType: 'product',
+        //     targetId: product._id,
+        //     action: 'toggle_status',
+        //     metadata: { isActive: product.isActive }
+        // });
 
         return successResponse(res, statusText, { isActive: product.isActive, product });
     } catch (error) {
@@ -352,7 +367,7 @@ exports.getFeaturedProducts = async (req, res) => {
 //Lấy danh sách sản phẩm gợi ý (dựa theo hành vi UserInteraction + random fallback)
 exports.getSuggestedProducts = async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
-    const userId = req.user?.userId;
+    const userId = req.actor._id.toString();;
     const parsedLimit = parseInt(limit);
     const skipCount = (parseInt(page) - 1) * parsedLimit;
 
@@ -528,7 +543,7 @@ exports.getProductsByShopForUser = async (req, res) => {
 exports.getProductDetailForUser = async (req, res) => {
     try {
         const { slug } = req.params;
-        const userId = req.user?.userId;
+        const userId = req.actor._id.toString();
 
         // Lấy thông tin sản phẩm (chỉ sản phẩm đang bán)
         const product = await Product.findOne({
@@ -556,7 +571,10 @@ exports.getProductDetailForUser = async (req, res) => {
         // Ghi lại hành vi xem sản phẩm nếu người dùng đã đăng nhập
         if (userId) {
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: "Shop",
+                    _id: userId
+                },
                 targetType: 'product',
                 targetId: product._id,
                 action: 'view',
@@ -584,12 +602,6 @@ exports.getProductsByShopForShop = async (req, res) => {
     const { page = 1, limit = 20, status, sort = 'newest', search } = req.query;
     const parsedLimit = parseInt(limit);
     const skipCount = (parseInt(page) - 1) * parsedLimit;
-    const userId = req.user.userId;
-
-    // Kiểm tra quyền truy cập
-    if (seller !== userId && req.user.role !== 'admin') {
-        return errorResponse(res, 'Không có quyền truy cập vào danh sách sản phẩm này', 403);
-    }
 
     try {
         // Xây dựng query
@@ -633,6 +645,7 @@ exports.getProductsByShopForShop = async (req, res) => {
 
         const products = await Product.find(query)
             .populate('mainCategory', 'name slug')
+            .populate('categories', 'name slug')
             .sort(sortOption)
             .skip(skipCount)
             .limit(parsedLimit);
@@ -667,12 +680,12 @@ exports.getProductsByShopForShop = async (req, res) => {
 exports.getProductDetailForSeller = async (req, res) => {
     try {
         const { slug } = req.params;
-        const userId = req.user.userId;
+        const actorId = req.actor._id.toString();
 
         // Lấy thông tin sản phẩm (bao gồm cả sản phẩm đã ngừng bán)
         const product = await Product.findOne({
             slug: slug,
-            seller: userId
+            seller: actorId
         })
             .populate('seller', 'username avatar shopName')
             .populate('mainCategory', 'name slug')
@@ -705,7 +718,7 @@ exports.getProductDetailForSeller = async (req, res) => {
 exports.getProductBySlug = async (req, res) => {
     try {
         const { slug } = req.params;
-        const userId = req.user?.userId;
+        const userId = req.actor._id.toString();
 
         // Lấy thông tin sản phẩm (chỉ sản phẩm đang bán)
         const product = await Product.findOne({
@@ -723,7 +736,10 @@ exports.getProductBySlug = async (req, res) => {
         // Ghi lại hành vi xem sản phẩm nếu người dùng đã đăng nhập
         if (userId) {
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: "Shop",
+                    _id: userId
+                },
                 targetType: 'product',
                 targetId: product._id,
                 action: 'view',

@@ -9,13 +9,20 @@ import { Button } from '../../components/ui/button';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import CommentItem from './CommentItem';
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '../../components/ui/select';
-import {commentOrReply, getCommentsByPost} from '../../services/postInteractionService';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '../../components/ui/select';
+import { commentOrReply, getCommentsByPost } from '../../services/postInteractionService';
+import { toast } from 'sonner';
 
 export default function CommentModal({ open, onClose, postId }) {
   const { user, setShowLoginModal } = useAuth();
   const [comment, setComment] = useState('');
-  const [comments, setComments] = useState([]); //Danh sách bình luận
+  const [comments, setComments] = useState([]);
   const [sortType, setSortType] = useState('top');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -33,6 +40,7 @@ export default function CommentModal({ open, onClose, postId }) {
         setComments(res.data.comments || []);
       } catch (err) {
         console.error('Lỗi khi tải bình luận:', err);
+        toast.error('Lỗi khi tải bình luận', { description: err.message });
       }
     };
 
@@ -50,24 +58,29 @@ export default function CommentModal({ open, onClose, postId }) {
     if (comment.trim() !== '') {
       setIsSubmitting(true);
       try {
-        const res = await commentOrReply(postId, comment); // ✅ Gọi API
-        if (res.data) {
-          // Đảm bảo dữ liệu comment có đầy đủ thông tin người dùng
+        const res = await commentOrReply(postId, comment);
+        if (res.data.comment) {
           const newComment = {
-            ...res.data,
-            userId: {
-              _id: user._id,
-              fullName: user.fullName,
-              avatar: user.avatar
+            ...res.data.comment,
+            author: {
+              type: user.role === 'seller' ? 'Shop' : 'User',
+              _id: {
+                _id: user._id,
+                fullName: user.fullName,
+                avatar: user.avatar,
+                name: user.role === 'seller' ? user.shopName : undefined,
+              },
             },
-            replies: []
+            replies: [],
+            likes: [],
           };
-          
-          setComments((prev) => [newComment, ...prev]); // Thêm comment mới vào đầu danh sách
+          setComments((prev) => [newComment, ...prev]);
           setComment('');
+          toast.success('Bình luận thành công');
         }
       } catch (err) {
         console.error('Lỗi gửi bình luận:', err);
+        toast.error('Lỗi khi gửi bình luận', { description: err.message });
       } finally {
         setIsSubmitting(false);
       }
@@ -76,46 +89,49 @@ export default function CommentModal({ open, onClose, postId }) {
 
   const handleReply = async (parentId, replyData) => {
     if (!user) return setShowLoginModal(true);
-    
+
     try {
       const res = await commentOrReply(postId, replyData.content, parentId);
-      if (res.data) {
+      if (res.data.comment) {
         const newReply = {
-          ...res.data,
-          userId: {
-            _id: user._id,
-            fullName: user.fullName,
-            avatar: user.avatar
-          }
+          ...res.data.comment,
+          author: {
+            type: user.role === 'seller' ? 'Shop' : 'User',
+            _id: {
+              _id: user._id,
+              fullName: user.fullName,
+              avatar: user.avatar,
+              name: user.role === 'seller' ? user.shopName : undefined,
+            },
+          },
+          likes: [],
         };
-
-        // Cập nhật cây bình luận
         const updatedComments = updateCommentTree(comments, parentId, newReply);
         setComments(updatedComments);
+        toast.success('Phản hồi thành công');
       }
     } catch (err) {
       console.error('Lỗi gửi phản hồi:', err);
+      toast.error('Lỗi khi gửi phản hồi', { description: err.message });
     }
-  };  
+  };
 
   const updateCommentTree = (comments, parentId, newReply) => {
-    return comments.map(comment => {
-      // Nếu đây là comment cha trực tiếp
+    return comments.map((comment) => {
       if (comment._id === parentId) {
         return {
           ...comment,
-          replies: [...(comment.replies || []), newReply]
+          replies: [...(comment.replies || []), newReply],
         };
       }
-      
-      // Nếu comment này có replies, tìm kiếm trong replies
+
       if (comment.replies && comment.replies.length > 0) {
         return {
           ...comment,
-          replies: updateCommentTree(comment.replies, parentId, newReply)
+          replies: updateCommentTree(comment.replies, parentId, newReply),
         };
       }
-      
+
       return comment;
     });
   };
@@ -126,12 +142,10 @@ export default function CommentModal({ open, onClose, postId }) {
         className="max-w-xl bg-white rounded-xl shadow-lg"
         overlayClassName="bg-black/10 backdrop-blur-sm"
       >
-        {/* 1. Header */}
         <DialogHeader className="border-b pb-2 mb-2">
           <DialogTitle className="text-center text-lg font-semibold">Bình luận</DialogTitle>
         </DialogHeader>
 
-        {/* 2. Select Sort */}
         <div className="flex justify-start">
           <Select value={sortType} onValueChange={setSortType}>
             <SelectTrigger className="w-40 h-8 text-sm bg-gray-100 border-none">
@@ -147,18 +161,22 @@ export default function CommentModal({ open, onClose, postId }) {
           </Select>
         </div>
 
-        {/* 3. Danh sách bình luận */}
         <div className="max-h-60 overflow-y-auto space-y-2">
           {comments.length === 0 ? (
             <div className="text-center text-gray-500 py-4">Chưa có bình luận nào</div>
           ) : (
             comments.map((comment) => (
-              <CommentItem key={comment._id} data={comment} onReply={handleReply} nestLevel={0} postId={postId}/>
+              <CommentItem
+                key={comment._id}
+                data={comment}
+                onReply={handleReply}
+                nestLevel={0}
+                postId={postId}
+              />
             ))
           )}
         </div>
 
-        {/* 4. Input bình luận */}
         <div className="flex items-center gap-2">
           <Input
             placeholder="Nhập bình luận..."
@@ -170,7 +188,6 @@ export default function CommentModal({ open, onClose, postId }) {
             {isSubmitting ? 'Đang gửi...' : 'Gửi'}
           </Button>
         </div>
-
       </DialogContent>
     </Dialog>
   );

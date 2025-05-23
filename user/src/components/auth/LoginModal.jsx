@@ -120,7 +120,7 @@ export default function LoginModal() {
               className="text-blue-600 cursor-pointer font-medium"
               onClick={() => {
                 setShowLoginModal(false);
-                navigate('/auth/register');
+                navigate('/auth?type=register');
               }}
             >
               Đăng ký ngay

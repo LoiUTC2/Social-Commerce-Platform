@@ -5,7 +5,7 @@ import { Input } from '../../../components/ui/input';
 import { Textarea } from '../../../components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage, } from '../../../components/ui/form';
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '../../../components/ui/form';
 import { Package, ArrowLeft, Upload, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { createProduct } from '../../../services/productService';
@@ -14,6 +14,8 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { useAuth } from '../../../contexts/AuthContext';
 import { uploadToCloudinary } from '../../../utils/uploadToCloudinary';
+import { getCategoryTree } from '../../../services/categoryService';
+import CreateCategoryModal from '../../../components/common/CreateCategoryModal';
 
 // Schema validation với Yup
 const schema = yup.object().shape({
@@ -21,8 +23,8 @@ const schema = yup.object().shape({
     description: yup.string().trim().required('Mô tả sản phẩm là bắt buộc'),
     price: yup
         .number()
-        .nullable() // Cho phép null
-        .transform((value) => (value === null || value === '' ? undefined : Number(value))) // Chuyển null/rỗng thành undefined   
+        .nullable()
+        .transform((value) => (value === null || value === '' ? undefined : Number(value)))
         .required('Giá sản phẩm là bắt buộc')
         .positive('Giá phải là số dương'),
     stock: yup
@@ -58,25 +60,25 @@ const schema = yup.object().shape({
     ),
 });
 
-// Mock data cho danh mục sản phẩm
-const productCategories = [
-    "Điện thoại", "Laptop", "Tablet", "Phụ kiện", "Máy ảnh", "Thời trang", "Thể thao",
-    "Sneakers", "Đồng hồ", "Mỹ phẩm", "Nước hoa", "Đồ gia dụng", "Nội thất", "Công nghệ", "Gaming", "Đồ ăn",
-    "Đồ uống", "Sách", "Đồ chơi", "Xe cộ", "Âm thanh", "Máy tính bảng", "Flagship", "Nhiếp ảnh"
-];
-
 export default function AddProduct() {
     const { user } = useAuth();
     const navigate = useNavigate();
+
+    // State cho danh mục
+    const [categories, setCategories] = useState([]);
+    const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+    const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+    const [selectedLevel1, setSelectedLevel1] = useState('');
+    const [selectedLevel2, setSelectedLevel2] = useState('');
 
     // Khởi tạo form với React Hook Form và Yup
     const form = useForm({
         defaultValues: {
             name: '',
             description: '',
-            price: null, // Đặt giá trị ban đầu là số
-            discount: null, // Đặt giá trị ban đầu là số
-            stock: null, // Đặt giá trị ban đầu là số
+            price: null,
+            discount: null,
+            stock: null,
             category: '',
             brand: '',
             condition: 'new',
@@ -100,12 +102,57 @@ export default function AddProduct() {
     const [mediaFiles, setMediaFiles] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Cleanup URL preview khi component unmount
+    // Lấy danh mục từ API
+    const fetchCategories = async () => {
+        setIsLoadingCategories(true);
+        try {
+            const response = await getCategoryTree();
+            setCategories(response.data || []);
+            console.log('Categories fetched:', response.data);
+        } catch (error) {
+            toast.error('Lỗi', { description: 'Không thể tải danh mục. Vui lòng thử lại.' });
+            console.error('Lỗi khi lấy danh mục:', error);
+        } finally {
+            setIsLoadingCategories(false);
+        }
+    };
+
+    // Gọi API lấy danh mục khi component mount
     useEffect(() => {
+        fetchCategories();
         return () => {
             mediaFiles.forEach((image) => URL.revokeObjectURL(image.preview));
         };
     }, [mediaFiles]);
+
+    // Xử lý khi danh mục cấp 1 thay đổi
+    const handleLevel1Change = (name) => {
+        const category = categories.find(cat => cat.name === name);
+        setSelectedLevel1(name);
+        setSelectedLevel2('');
+        form.setValue('category', category?._id || '');
+        console.log('Selected Level 1:', { name, id: category?._id });
+    };
+
+    // Xử lý khi danh mục cấp 2 thay đổi
+    const handleLevel2Change = (name) => {
+        const category = name
+            ? categories.find(cat => cat.name === selectedLevel1)?.children.find(child => child.name === name)
+            : categories.find(cat => cat.name === selectedLevel1);
+        setSelectedLevel2(name);
+        form.setValue('category', category?._id || '');
+        console.log('Selected Level 2:', { name, id: category?._id });
+    };
+
+    // Xử lý khi danh mục cấp 3 thay đổi
+    const handleLevel3Change = (name) => {
+        const category = categories
+            .find(cat => cat.name === selectedLevel1)
+            ?.children.find(child => child.name === selectedLevel2)
+            ?.children.find(grandchild => grandchild.name === name);
+        form.setValue('category', category?._id || '');
+        console.log('Selected Level 3:', { name, id: category?._id });
+    };
 
     // Xử lý upload ảnh
     const handleMediaChange = (e) => {
@@ -152,6 +199,14 @@ export default function AddProduct() {
         setIsSubmitting(true);
 
         try {
+            console.log('Form data before submit:', data);
+            console.log('Category ID to be sent:', data.category);
+
+            // Kiểm tra category ID hợp lệ
+            if (!data.category) {
+                throw new Error('Danh mục sản phẩm không được để trống');
+            }
+
             const imageUrls = [];
             const videoUrls = [];
 
@@ -167,17 +222,24 @@ export default function AddProduct() {
 
             // Chuẩn bị dữ liệu sản phẩm
             const productData = {
-                ...data,
+                name: data.name,
+                description: data.description,
                 price: data.price || 0,
                 discount: data.discount || 0,
                 stock: data.stock || 0,
-                tags: data.tags ? data.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
+                mainCategory: data.category, // Gửi _id của danh mục thấp nhất
                 seller: user?._id,
                 images: imageUrls,
                 videos: videoUrls,
+                brand: data.brand,
+                condition: data.condition,
+                variants: data.variants,
+                tags: data.tags ? data.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
             };
 
-            await createProduct(productData); // Gọi API tạo sản phẩm
+            console.log('Product data to be sent:', productData);
+
+            await createProduct(productData);
 
             toast.success('Thành công', { description: 'Thêm sản phẩm mới thành công' });
 
@@ -187,7 +249,7 @@ export default function AddProduct() {
             if (error.message.includes('validation')) {
                 toast.error('Thất bại', { description: 'Vui lòng kiểm tra lại các trường nhập, đảm bảo giảm giá không lớn hơn giá bán.' });
             } else {
-                toast.error('Thất bại', { description: `Thêm sản phẩm thất bại: ${error.message || 'Đã có lỗi xảy ra'}` });
+                toast.error('Thất bại', { description: `Thêm sản phẩm thất bại: ${error.response?.data?.message || error.message}` });
             }
         } finally {
             setIsSubmitting(false);
@@ -196,10 +258,9 @@ export default function AddProduct() {
 
     // Xử lý quay lại trang danh sách
     const handleGoBack = () => {
-        // Kiểm tra nếu form có thay đổi (isDirty)
         if (form.formState.isDirty || mediaFiles.length > 0) {
             const confirmLeave = window.confirm('Bạn đã thay đổi dữ liệu. Bạn có chắc muốn thoát mà không lưu?');
-            if (!confirmLeave) return; // Nếu người dùng không đồng ý, dừng lại
+            if (!confirmLeave) return;
         }
         navigate('/seller/products');
     };
@@ -279,7 +340,7 @@ export default function AddProduct() {
                                     )}
                                 />
 
-                                {/* Giá*/}
+                                {/* Giá */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <FormField
                                         control={form.control}
@@ -293,7 +354,7 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập giá (VNĐ)"
-                                                        value={field.value || ''} // Hiển thị rỗng nếu null
+                                                        value={field.value || ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
@@ -312,7 +373,7 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập giảm giá (VNĐ)"
-                                                        value={field.value || ''} // Hiển thị rỗng nếu null
+                                                        value={field.value || ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
@@ -336,7 +397,7 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập số lượng"
-                                                        value={field.value || ''} // Hiển thị rỗng nếu null
+                                                        value={field.value || ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
@@ -362,32 +423,118 @@ export default function AddProduct() {
 
                                 {/* Danh mục và trạng thái */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <FormField
-                                        control={form.control}
-                                        name="category"
-                                        render={({ field }) => (
-                                            <FormItem className="space-y-2">
-                                                <FormLabel>
-                                                    Danh mục <span className="text-red-500">*</span>
-                                                </FormLabel>
-                                                <Select onValueChange={field.onChange} value={field.value}>
+                                    <div className="space-y-2">
+                                        {/* Select cho danh mục cấp 1 */}
+                                        <FormItem>
+                                            <FormLabel>
+                                                Danh mục cấp 1 <span className="text-red-500">*</span>
+                                            </FormLabel>
+                                            <div className="flex items-center gap-2">
+                                                <Select onValueChange={handleLevel1Change} value={selectedLevel1}>
                                                     <FormControl>
                                                         <SelectTrigger>
-                                                            <SelectValue placeholder="Chọn danh mục" />
+                                                            <SelectValue placeholder="Chọn danh mục cấp 1" />
                                                         </SelectTrigger>
                                                     </FormControl>
                                                     <SelectContent>
-                                                        {productCategories.map((category) => (
-                                                            <SelectItem key={category} value={category}>
-                                                                {category}
+                                                        {categories.map((cat) => (
+                                                            <SelectItem key={cat._id} value={cat.name}>
+                                                                {cat.name}
                                                             </SelectItem>
                                                         ))}
                                                     </SelectContent>
                                                 </Select>
-                                                <FormMessage />
-                                            </FormItem>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setIsCategoryModalOpen(true)}
+                                                >
+                                                    <Plus className="h-4 w-4 mr-1" /> Thêm danh mục
+                                                </Button>
+                                            </div>
+                                            <FormDescription>
+                                                Chọn danh mục cấp 1 cho sản phẩm
+                                            </FormDescription>
+                                        </FormItem>
+
+                                        {/* Select cho danh mục cấp 2 */}
+                                        {selectedLevel1 && categories.find(cat => cat.name === selectedLevel1)?.children?.length > 0 && (
+                                            <FormField
+                                                control={form.control}
+                                                name="category"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Danh mục cấp 2</FormLabel>
+                                                        <Select onValueChange={handleLevel2Change} value={selectedLevel2}>
+                                                            <FormControl>
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Chọn danh mục cấp 2" />
+                                                                </SelectTrigger>
+                                                            </FormControl>
+                                                            <SelectContent>
+                                                                {categories
+                                                                    .find(cat => cat.name === selectedLevel1)
+                                                                    ?.children.map((child) => (
+                                                                        <SelectItem key={child._id} value={child.name}>
+                                                                            {child.name}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <FormDescription>
+                                                            Chọn danh mục cấp 2 nếu có
+                                                        </FormDescription>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
                                         )}
-                                    />
+
+                                        {/* Select cho danh mục cấp 3 */}
+                                        {selectedLevel2 && categories.find(cat => cat.name === selectedLevel1)?.children?.find(child => child.name === selectedLevel2)?.children?.length > 0 && (
+                                            <FormField
+                                                control={form.control}
+                                                name="category"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Danh mục cấp 3</FormLabel>
+                                                        <Select
+                                                            onValueChange={handleLevel3Change}
+                                                            value={
+                                                                field.value
+                                                                    ? categories
+                                                                        .find(cat => cat.name === selectedLevel1)
+                                                                        ?.children.find(child => child.name === selectedLevel2)
+                                                                        ?.children.find(grandchild => grandchild._id === field.value)?.name || ''
+                                                                    : ''
+                                                            }
+                                                        >
+                                                            <FormControl>
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Chọn danh mục cấp 3" />
+                                                                </SelectTrigger>
+                                                            </FormControl>
+                                                            <SelectContent>
+                                                                {categories
+                                                                    .find(cat => cat.name === selectedLevel1)
+                                                                    ?.children.find(child => child.name === selectedLevel2)
+                                                                    ?.children.map((grandchild) => (
+                                                                        <SelectItem key={grandchild._id} value={grandchild.name}>
+                                                                            {grandchild.name}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <FormDescription>
+                                                            Chọn danh mục cấp 3 nếu có
+                                                        </FormDescription>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        )}
+                                    </div>
 
                                     <FormField
                                         control={form.control}
@@ -601,6 +748,20 @@ export default function AddProduct() {
                     </div>
                 </form>
             </Form>
+
+            <CreateCategoryModal
+                open={isCategoryModalOpen}
+                onOpenChange={setIsCategoryModalOpen}
+                onCategoryCreated={() => {
+                    fetchCategories();
+                    setSelectedLevel2('');
+                    form.setValue('category', selectedLevel1
+                        ? categories.find(cat => cat.name === selectedLevel1)?._id || ''
+                        : '');
+                }}
+                categories={categories}
+                user={user}
+            />
         </div>
     );
 }

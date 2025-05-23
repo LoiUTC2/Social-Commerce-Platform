@@ -42,6 +42,12 @@ export const getMyShop = async () => {
     return res.data;
 };
 
+// Lấy thông tin Shop theo slug  
+export const getShopBySlug = async (slug) => {
+    const res = await api.get(`/shops/slug/${slug}`);
+    return res.data;
+};
+
 // Lấy danh sách shop đã theo dõi
 export const getFollowedShops = async (page = 1, limit = 10) => {
     const res = await api.get(`/shops/followed?page=${page}&limit=${limit}`);

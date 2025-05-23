@@ -5,10 +5,17 @@ const Comment = require('../models/Comment');
 
 exports.likePost = async (req, res) => {
     try {
-        const { userId } = req.user;
+        // const { userId } = req.user;
+        const actor = req.actor; // [Grok] Lấy thông tin actor từ middleware setActor, chứa _id và type (user/shop)
         const { id: postId } = req.params;
 
-        const existing = await UserInteraction.findOne({ userId, targetType: 'post', targetId: postId, action: 'like' });
+        const existing = await UserInteraction.findOne({
+            "author._id": actor._id,
+            "author.type": actor.type === 'shop' ? 'Shop' : 'User', // [Grok] Kiểm tra cả type và _id của author để xác định tương tác trước đó
+            targetType: 'post',
+            targetId: postId,
+            action: 'like'
+        });
 
         let message = '';
         let newLikesCount = 0;
@@ -26,7 +33,10 @@ exports.likePost = async (req, res) => {
         } else {
             // Like
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: actor.type === 'shop' ? 'Shop' : 'User',
+                    _id: actor._id
+                }, // [Grok] Lưu author với type và _id thay vì userId
                 targetType: 'post',
                 targetId: postId,
                 action: 'like',
@@ -39,7 +49,7 @@ exports.likePost = async (req, res) => {
             message = 'Đã thích bài viết';
             newLikesCount = updated.likesCount;
         }
-        return successResponse(res, message, newLikesCount);
+        return successResponse(res, message, { likesCount: newLikesCount });
     } catch (err) {
         return errorResponse(res, 'Lỗi khi thích bài viết', 500, err.message);
     }
@@ -53,10 +63,13 @@ exports.getPostLikes = async (req, res) => {
             targetType: 'post',
             targetId: postId,
             action: 'like'
-        }).populate('userId', 'fullName avatar'); // Lấy thông tin user
+        }).populate('author._id', 'fullName avatar name'); // [Grok] Populate author._id để lấy thông tin User hoặc Shop
 
-        const users = interactions.map(interaction => interaction.userId);
-        return successResponse(res, 'Danh sách người dùng đã thích bài viết', users);
+        const authors = interactions.map(interaction => ({
+            type: interaction.author.type,
+            ...interaction.author._id._doc
+        })); // [Grok] Trả về thông tin author bao gồm type và các trường đã populate
+        return successResponse(res, 'Danh sách người dùng đã thích bài viết', authors);
     } catch (err) {
         return errorResponse(res, 'Lỗi khi lấy danh sách like', 500, err.message);
     }
@@ -65,13 +78,17 @@ exports.getPostLikes = async (req, res) => {
 // Bình luận bài viết hoặc reply
 exports.commentOrReply = async (req, res) => {
     try {
-        const { userId } = req.user;
+        // const { userId } = req.user;
+        const actor = req.actor; // [Grok] Sử dụng req.actor để lấy thông tin người thực hiện hành động
         const { postId } = req.params;
         const { text, parentId } = req.body;
 
         const comment = new Comment({
-            userId,
             postId,
+            author: {
+                type: actor.type === 'shop' ? 'Shop' : 'User',
+                _id: actor._id
+            }, // [Grok] Tạo comment với author theo cấu trúc type và _id
             text,
             parentId: parentId || null
         });
@@ -80,10 +97,13 @@ exports.commentOrReply = async (req, res) => {
 
         let commentsCount = 0;
         let replyCount = 0;
-        
+
         if (!parentId) { // Nếu là bình luận bài viết, tức là không có id comment cha thì nó là comment bài viết
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: actor.type === 'shop' ? 'Shop' : 'User',
+                    _id: actor._id
+                }, // [Grok] Lưu author thay vì userId
                 targetType: 'post',
                 targetId: postId,
                 action: 'comment',
@@ -94,7 +114,10 @@ exports.commentOrReply = async (req, res) => {
             commentsCount = post.commentsCount; //tổng bình luận của 1 bài viết
         } else {  // Nếu là reply cho comment, tức là có id_comment cha thì nó là reply (reply lại comment cha)
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: actor.type === 'shop' ? 'Shop' : 'User',
+                    _id: actor._id
+                }, // [Grok] Lưu author thay vì userId
                 targetType: 'comment',
                 targetId: parentId,
                 action: 'comment',
@@ -106,7 +129,7 @@ exports.commentOrReply = async (req, res) => {
         const post = await Post.findById(postId);
         commentsCount = post.commentsCount; //tổng bình luận của 1 bài viết
 
-        return successResponse(res, 'Bình luận thành công', {comment, commentsCount, replyCount});
+        return successResponse(res, 'Bình luận thành công', { comment, commentsCount, replyCount });
     } catch (err) {
         return errorResponse(res, 'Lỗi khi bình luận', 500, err.message);
     }
@@ -115,7 +138,7 @@ exports.commentOrReply = async (req, res) => {
 // Thích / Bỏ thích comment
 exports.likeComment = async (req, res) => {
     try {
-        const { userId } = req.user;
+        const actor = req.actor; // [Grok] Sử dụng actor thay vì userId chưa định nghĩa
         const { commentId } = req.params;
 
         const comment = await Comment.findById(commentId);
@@ -125,22 +148,26 @@ exports.likeComment = async (req, res) => {
 
         let isLiked = false;
 
-        if (comment.likes.includes(userId)) {
+        if (comment.likes.includes(actor._id)) {
             // 👎 Nếu đã like → bỏ like
-            await Comment.findByIdAndUpdate(commentId, { $pull: { likes: userId } });
+            await Comment.findByIdAndUpdate(commentId, { $pull: { likes: actor._id } });
 
             await UserInteraction.deleteOne({
-                userId,
+                "author._id": actor._id,
+                "author.type": actor.type === 'shop' ? 'Shop' : 'User', // [Grok] Xóa tương tác dựa trên cả author._id và author.type
                 targetType: 'comment',
                 targetId: commentId,
                 action: 'like'
             });
         } else {
             // 👍 Nếu chưa like → thêm like
-            await Comment.findByIdAndUpdate(commentId, { $addToSet: { likes: userId } });
+            await Comment.findByIdAndUpdate(commentId, { $addToSet: { likes: actor._id } });
 
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: actor.type === 'shop' ? 'Shop' : 'User',
+                    _id: actor._id
+                }, // [Grok] Lưu author thay vì userId
                 targetType: 'comment',
                 targetId: commentId,
                 action: 'like'
@@ -160,7 +187,7 @@ exports.likeComment = async (req, res) => {
 //Lấy bình luận dạng cây đến 3 tầng
 exports.getCommentsByPost = async (req, res) => {
     try {
-        const { userId } = req.user || {}; // nếu chưa login, vẫn trả về
+        const actor = req.actor || {}; // [Grok] Cho phép truy cập không cần đăng nhập, actor rỗng nếu chưa đăng nhập
         const { postId } = req.params;
         const { sortBy = 'newest', page = 1, limit = 10 } = req.query;
 
@@ -181,7 +208,7 @@ exports.getCommentsByPost = async (req, res) => {
 
         // Lấy tầng 1 (bình luận gốc)
         const comments = await Comment.find({ postId, parentId: null })
-            .populate('userId', 'fullName avatar')
+            .populate('author._id', 'fullName avatar name') // [Grok] Populate author._id để lấy thông tin User hoặc Shop
             .sort(sortQuery)
             .skip(skip)
             .limit(limitNumber);
@@ -193,7 +220,7 @@ exports.getCommentsByPost = async (req, res) => {
             const replyCount = await Comment.countDocuments({ parentId: c._id });
             commentMap[c._id] = {
                 ...c._doc,
-                isLiked: userId ? c.likes.includes(userId) : false,
+                isLiked: actor._id ? c.likes.includes(actor._id) : false,
                 likeCount: c.likes.length,
                 replyCount,
                 replies: []
@@ -204,7 +231,7 @@ exports.getCommentsByPost = async (req, res) => {
 
         // Lấy tầng 2
         const level2Replies = await Comment.find({ parentId: { $in: parentIdsLevel1 } })
-            .populate('userId', 'fullName avatar')
+            .populate('author._id', 'fullName avatar name')
             .sort({ createdAt: 1 });
 
         const parentIdsLevel2 = [];
@@ -217,7 +244,7 @@ exports.getCommentsByPost = async (req, res) => {
             if (commentMap[r.parentId]) {
                 commentMap[r.parentId].replies.push({
                     ...r._doc,
-                    isLiked: userId ? r.likes.includes(userId) : false,
+                    isLiked: actor._id ? r.likes.includes(actor._id) : false,
                     likeCount: r.likes.length,
                     replyCount,
                     replies: []
@@ -227,7 +254,7 @@ exports.getCommentsByPost = async (req, res) => {
 
         // Lấy tầng 3
         const level3Replies = await Comment.find({ parentId: { $in: parentIdsLevel2 } })
-            .populate('userId', 'fullName avatar')
+            .populate('author._id', 'fullName avatar name')
             .sort({ createdAt: 1 });
 
         // Gắn tầng 3 vào đúng chỗ trong reply của tầng 1
@@ -237,7 +264,7 @@ exports.getCommentsByPost = async (req, res) => {
                 if (replyLv2) {
                     replyLv2.replies.push({
                         ...r._doc,
-                        isLiked: userId ? r.likes.includes(userId) : false,
+                        isLiked: actor._id ? r.likes.includes(actor._id) : false,
                         likeCount: r.likes.length
                         // Tầng 3 không cần replyCount nữa (vì không hiển thị tầng 4)
                     });
@@ -266,10 +293,10 @@ exports.getCommentsByPost = async (req, res) => {
 //share bài viết
 exports.sharePost = async (req, res) => {
     try {
-        const { userId } = req.user;
+        const actor = req.actor; // [Grok] Sử dụng actor thay vì req.user
         const { id: postId } = req.params;
         const { content, privacy = 'public' } = req.body;
-        
+
         console.log('Received data:', { content, privacy }); // Log để kiểm tra
 
         const originalPost = await Post.findById(postId);
@@ -279,7 +306,10 @@ exports.sharePost = async (req, res) => {
 
         // Tạo một bài viết mới dạng share
         const newPost = new Post({
-            userId,
+            author: {
+                type: actor.type === 'shop' ? 'Shop' : 'User',
+                _id: actor._id
+            }, // [Grok] Sử dụng author thay vì userId cho Post
             content: content || '',
             sharedPost: postId,
             privacy,
@@ -289,7 +319,10 @@ exports.sharePost = async (req, res) => {
         await newPost.save();
 
         await UserInteraction.create({
-            userId,
+            author: {
+                type: actor.type === 'shop' ? 'Shop' : 'User',
+                _id: actor._id
+            }, // [Grok] Lưu author thay vì userId
             targetType: 'post',
             targetId: postId,
             action: 'share',
@@ -315,18 +348,18 @@ exports.getPostShares = async (req, res) => {
         const skip = (pageNumber - 1) * limitNumber;
 
         // Tìm tất cả bài viết share từ bài viết gốc này
-        const shares = await Post.find({ 
-            sharedPost: postId, 
-            type: 'share' 
+        const shares = await Post.find({
+            sharedPost: postId,
+            type: 'share'
         })
-        .populate('userId', 'fullName avatar')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNumber);
+            .populate('author._id', 'fullName avatar name') // [Grok] Populate author._id để lấy thông tin User hoặc Shop
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limitNumber);
 
-        const totalShares = await Post.countDocuments({ 
-            sharedPost: postId, 
-            type: 'share' 
+        const totalShares = await Post.countDocuments({
+            sharedPost: postId,
+            type: 'share'
         });
 
         return successResponse(res, 'Danh sách chia sẻ bài viết', {

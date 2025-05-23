@@ -5,12 +5,31 @@ const UserInteraction = require('../models/UserInteraction');
 const { successResponse, errorResponse } = require('../utils/response');
 const mongoose = require('mongoose');
 const slugify = require('slugify');
+const tokenService = require('../utils/tokenService');
+
+const sendTokenCookies = (res, accessToken, refreshToken) => {
+    // Access Token
+    res.cookie('accessToken', accessToken, {
+        httpOnly: false, //cookie có thể được truy cập bởi JavaScript trên client.
+        secure: true, // chỉ nên true nếu dùng https
+        sameSite: 'Strict',
+        maxAge: 15 * 60 * 1000 // 15 phút
+    });
+
+    // Refresh Token
+    res.cookie('refreshToken', refreshToken, {
+        httpOnly: true, //cookie chỉ có thể được truy cập bởi server và không thể bị truy cập bởi JavaScript trên trình duyệt.
+        secure: true,
+        sameSite: 'Strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
+    });
+};
 
 //Chuyển đổi tài khoản, seller hoặc buyer
 exports.switchUserRole = async (req, res) => {
-    const userId = req.user.userId;
-
     try {
+        const userId = req.user.userId;
+
         const user = await User.findById(userId);
         if (!user) return errorResponse(res, 'Không tìm thấy người dùng', 404);
 
@@ -21,20 +40,64 @@ exports.switchUserRole = async (req, res) => {
             return errorResponse(res, `Bạn chưa có quyền chuyển sang ${targetRole}`, 403);
         }
 
+        // Tạo token mới với role mới
+        const payload = { userId: user._id, role: targetRole };
+        const newAccessToken = tokenService.generateAccessToken(payload);
+        const newRefreshToken = tokenService.generateRefreshToken(payload);
+
+        // Cập nhật refresh token trong DB
+        user.refreshToken = newRefreshToken;
+        user.refreshTokenUsage = 0; // Reset usage count
+        await user.save();
+
+        // Gửi token mới qua cookies
+        sendTokenCookies(res, newAccessToken, newRefreshToken);
+
         user.role = targetRole;
         await user.save();
 
-        const userData = {
+        let actor = null;
+        if (targetRole === 'seller' && user.shopId) {
+            const shop = await Shop.findById(user.shopId).populate('seller');
+            if (!shop) return errorResponse(res, 'Không tìm thấy shop', 404);
+
+            actor = {
+                _id: shop._id,
+                type: 'shop',
+                fullName: shop.name,
+                slug: shop.slug,
+                avatar: shop.avatar,
+                sellerId: shop.seller?._id,
+                legalName: shop.seller?.legalName,
+                email: shop.contact.email,
+                roles: user.roles,
+                role: user.role,
+                shopId: user.shopId,
+            };
+        } else {
+            actor = {
                 _id: user._id,
+                type: 'user',
                 fullName: user.fullName,
+                slug: user.slug,
+                avatar: user.avatar,
                 email: user.email,
                 roles: user.roles,
                 role: user.role,
                 shopId: user.shopId,
-                isSellerActive: user.isSellerActive,     
+            };
+        }
+
+        const data = {
+            accessToken: newAccessToken,
+            user: actor,
+            previousRole: user.role === 'buyer' ? 'seller' : 'buyer', // Role trước đó
+            currentRole: targetRole,
+            message: `Đã chuyển từ ${targetRole === 'seller' ? 'Người mua' : 'Người bán'} sang ${targetRole === 'seller' ? 'Người bán' : 'Người mua'}`,
+            success: true,
         };
 
-        return successResponse(res, `Chuyển sang vai trò ${targetRole} thành công`, userData);
+        return successResponse(res, `Chuyển sang vai trò ${targetRole} thành công`, data);
     } catch (err) {
         return errorResponse(res, 'Lỗi khi chuyển vai trò', 500, err.message);
     }
@@ -53,48 +116,24 @@ exports.createShop = async (req, res) => {
         const existingShop = await Shop.findOne({ owner: userId });
         if (existingShop) return errorResponse(res, 'Bạn đã tạo yêu cầu mở shop trước đó, đang đợi duyệt', 400);
 
-        // Tìm hoặc tạo thông tin seller
-        let seller = await Seller.findOne({ user: userId });
-        if (!seller) {
-            seller = new Seller({
-                user: userId,
-                status: 'active'
-            });
-            await seller.save();
-        }
-
-        const { 
-            name, 
-            description, 
-            avatar, 
-            logo, 
-            coverImage, 
+        const {
+            name,
+            description,
+            avatar,
+            logo,
+            coverImage,
             contact,
             customerSupport,
             businessInfo,
             operations,
             productInfo,
             seo,
-            tags 
+            tags
         } = req.body;
-
-        // Tạo slug từ tên shop
-        const slug = slugify(name, { 
-            lower: true,
-            strict: true
-        });
-
-        // Kiểm tra slug đã tồn tại chưa
-        const slugExists = await Shop.findOne({ slug });
-        if (slugExists) {
-            return errorResponse(res, 'Tên shop đã được sử dụng, vui lòng chọn tên khác', 400);
-        }
 
         const newShop = new Shop({
             owner: userId,
-            seller: seller._id,
             name,
-            slug,
             description,
             avatar,
             logo,
@@ -129,44 +168,28 @@ exports.createShop = async (req, res) => {
 // Cập nhật thông tin shop (phải là chủ shop)
 exports.updateShop = async (req, res) => {
     try {
-        const userId = req.user.userId;
-        const shop = await Shop.findOne({ owner: userId });
+        // const userId = req.user.userId;
+        const sellerId = req.actor._id.toString();
+        const shop = await Shop.findOne({ _id: sellerId });
         if (!shop) return errorResponse(res, 'Bạn chưa có shop', 404);
 
-        const { 
-            name, 
-            description, 
-            avatar, 
-            logo, 
-            coverImage, 
+        const {
+            name,
+            description,
+            avatar,
+            logo,
+            coverImage,
             contact,
             customerSupport,
             businessInfo,
             operations,
             productInfo,
             seo,
-            tags 
+            tags
         } = req.body;
 
-        // Nếu có thay đổi tên shop, cần cập nhật lại slug
-        if (name && name !== shop.name) {
-            const newSlug = slugify(name, { 
-                lower: true,
-                strict: true
-            });
-            
-            // Kiểm tra slug mới đã tồn tại chưa (nếu khác với slug hiện tại)
-            if (newSlug !== shop.slug) {
-                const slugExists = await Shop.findOne({ slug: newSlug });
-                if (slugExists) {
-                    return errorResponse(res, 'Tên shop đã được sử dụng, vui lòng chọn tên khác', 400);
-                }
-                shop.slug = newSlug;
-            }
-            shop.name = name;
-        }
-
         // Cập nhật các thông tin khác
+        if (name !== undefined) shop.name = name;
         if (description !== undefined) shop.description = description;
         if (avatar !== undefined) shop.avatar = avatar;
         if (logo !== undefined) shop.logo = logo;
@@ -192,17 +215,18 @@ exports.updateShop = async (req, res) => {
 // Cập nhật trạng thái hoạt động của shop (chỉ seller có quyền)
 exports.toggleShopActiveStatus = async (req, res) => {
     try {
-        const userId = req.user.userId;
-        const shop = await Shop.findOne({ owner: userId });
-        
+        // const userId = req.user.userId;
+        const sellerId = req.actor._id.toString();
+        const shop = await Shop.findOne({ _id: sellerId });
+
         if (!shop) return errorResponse(res, 'Bạn chưa có shop', 404);
-        if (shop.status.approvalCreateStatus !== 'approved') 
+        if (shop.status.approvalCreateStatus !== 'approved')
             return errorResponse(res, 'Shop chưa được duyệt, không thể thay đổi trạng thái', 400);
 
         // Đảo ngược trạng thái hiện tại
         shop.status.isActive = !shop.status.isActive;
         shop.updatedAt = new Date();
-        
+
         await shop.save();
 
         const statusMessage = shop.status.isActive ? 'hoạt động' : 'tạm ngưng';
@@ -215,23 +239,24 @@ exports.toggleShopActiveStatus = async (req, res) => {
 // Tạo yêu cầu xóa shop (chỉ seller có quyền)
 exports.requestDeleteShop = async (req, res) => {
     try {
-        const userId = req.user.userId;
+        // const userId = req.user.userId;
+        const sellerId = req.actor._id.toString();
         const { reason } = req.body; // Lý do xóa shop
-        
-        const shop = await Shop.findOne({ owner: userId });
+
+        const shop = await Shop.findOne({ _id: sellerId });
         if (!shop) return errorResponse(res, 'Bạn chưa có shop', 404);
-        
+
         if (shop.status.approvalDeleteStatus === 'pending') {
             return errorResponse(res, 'Bạn đã gửi yêu cầu xóa shop trước đó, đang chờ xét duyệt', 400);
         }
-        
+
         // Cập nhật trạng thái yêu cầu xóa shop
         shop.status.approvalDeleteStatus = 'pending';
         shop.status.deleteNote = reason || '';
         shop.updatedAt = new Date();
-        
+
         await shop.save();
-        
+
         return successResponse(res, 'Đã gửi yêu cầu xóa shop, vui lòng chờ admin duyệt', shop);
     } catch (error) {
         return errorResponse(res, 'Lỗi khi gửi yêu cầu xóa shop', 500, error.message);
@@ -241,7 +266,8 @@ exports.requestDeleteShop = async (req, res) => {
 //Follow hoặc UnFollow
 exports.toggleFollowShop = async (req, res) => {
     const shopId = req.params.shopId;
-    const userId = req.user.userId;
+    // const userId = req.user.userId;
+    const actorId = req.actor._id.toString();
 
     try {
         const shop = await Shop.findById(shopId);
@@ -249,17 +275,20 @@ exports.toggleFollowShop = async (req, res) => {
             return errorResponse(res, 'Cửa hàng không tồn tại hoặc chưa được duyệt', 404);
         }
 
-         // Kiểm tra xem đã follow shop chưa
-        const isFollowing = shop.stats.followers.includes(userId);
+        // Kiểm tra xem đã follow shop chưa
+        const isFollowing = shop.stats.followers.includes(actorId);
 
         if (isFollowing) {
             // Hủy theo dõi
-            shop.stats.followers.pull(userId);
+            shop.stats.followers.pull(actorId);
             await shop.save();
 
             // Ghi lại tương tác người dùng
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: req.actor.type === "seller" ? "Shop" : "User",
+                    _id: actorId
+                },
                 targetType: 'shop',
                 targetId: shopId,
                 action: 'unfollow',
@@ -269,12 +298,15 @@ exports.toggleFollowShop = async (req, res) => {
             return successResponse(res, 'Đã hủy theo dõi shop', null);
         } else {
             // Theo dõi
-            shop.stats.followers.push(userId);
+            shop.stats.followers.push(actorId);
             await shop.save();
 
             // Ghi lại tương tác người dùng
             await UserInteraction.create({
-                userId,
+                author: {
+                    type: req.actor.type === "seller" ? "Shop" : "User",
+                    _id: actorId
+                },
                 targetType: 'shop',
                 targetId: shopId,
                 action: 'follow',
@@ -294,9 +326,9 @@ exports.getShopById = async (req, res) => {
     const userId = req.user?.userId || null;
 
     try {
-        const shop = await Shop.findOne({ 
-            _id: shopId, 
-            'status.isApprovedCreate': true 
+        const shop = await Shop.findOne({
+            _id: shopId,
+            'status.isApprovedCreate': true
         }).populate('owner', 'fullName avatar');
 
         if (!shop) {
@@ -325,12 +357,34 @@ exports.getShopById = async (req, res) => {
     }
 };
 
-// Lấy thông tin shop của người dùng hiện tại
-exports.getMyShop = async (req, res) => {
-    const userId = req.user.userId;
+// Lấy thông tin shop theo Slug
+exports.getShopBySlug = async (req, res) => {
+    const { slug } = req.params;
 
     try {
-        const shop = await Shop.findOne({ owner: userId });
+        const shop = await Shop.findOne({ slug })
+            .populate('owner', 'fullName avatar coverImage email phone')
+            .populate('seller')
+            .populate('productInfo.mainCategory', 'name')
+            .populate('productInfo.subCategories', 'name')
+            .populate('stats.followers', 'fullName avatar');
+
+        if (!shop) {
+            return errorResponse(res, 'Không tìm thấy cửa hàng', 404);
+        }
+
+        return successResponse(res, 'Lấy thông tin cửa hàng thành công', shop);
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi lấy thông tin cửa hàng', 500, err.message);
+    }
+};
+
+// Lấy thông tin shop của người dùng hiện tại
+exports.getMyShop = async (req, res) => {
+    const sellerId = req.actor._id.toString(); //này thực chất là shopID
+
+    try {
+        const shop = await Shop.findOne({ _id: sellerId });
         if (!shop) {
             return errorResponse(res, 'Bạn chưa có shop', 404);
         }
@@ -344,18 +398,18 @@ exports.getMyShop = async (req, res) => {
 // Lấy danh sách shop (sắp xếp theo đánh giá, lượt theo dõi, lượt xem)
 exports.getShops = async (req, res) => {
     try {
-        const { 
-            page = 1, 
-            limit = 10, 
-            sortBy = 'createdAt', 
+        const {
+            page = 1,
+            limit = 10,
+            sortBy = 'createdAt',
             order = 'desc',
             search = '',
             category,
             status
         } = req.query;
 
-        const query = { 
-            'status.isApprovedCreate': true 
+        const query = {
+            'status.isApprovedCreate': true
         };
 
         // Thêm điều kiện lọc theo trạng thái hoạt động
@@ -393,7 +447,7 @@ exports.getShops = async (req, res) => {
 
         // Đếm tổng số shop thỏa mãn điều kiện
         const total = await Shop.countDocuments(query);
-        
+
         // Lấy danh sách shop
         const shops = await Shop.find(query)
             .sort(sortOption)
@@ -426,7 +480,7 @@ exports.isShopOwner = async (req, res) => {
         if (!shop) return errorResponse(res, 'Không tìm thấy shop', 404);
 
         const isOwner = shop.owner.toString() === userId;
-        
+
         return successResponse(res, 'Kiểm tra quyền sở hữu shop thành công', { isOwner });
     } catch (error) {
         return errorResponse(res, 'Lỗi khi kiểm tra quyền sở hữu shop', 500, error.message);
@@ -436,16 +490,17 @@ exports.isShopOwner = async (req, res) => {
 // Xem danh sách shop đã theo dõi
 exports.getFollowedShops = async (req, res) => {
     try {
-        const userId = req.user.userId;
+        // const userId = req.user.userId;
+        const actorId = req.actor._id.toString();
         const { page = 1, limit = 10 } = req.query;
-        
-        const query = { 
-            'stats.followers': userId,
+
+        const query = {
+            'stats.followers': actorId,
             'status.isApprovedCreate': true
         };
-        
+
         const total = await Shop.countDocuments(query);
-        
+
         const followedShops = await Shop.find(query)
             .sort({ createdAt: -1 })
             .skip((page - 1) * limit)
