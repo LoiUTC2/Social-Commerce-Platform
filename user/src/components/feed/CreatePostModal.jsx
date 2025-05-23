@@ -12,8 +12,10 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '.
 import { uploadToCloudinary } from '../../utils/uploadToCloudinary';
 import { createPost } from '../../services/postService';
 import { toast } from 'sonner';
+import { useAuth } from '../../contexts/AuthContext';
 
 const CreatePostModal = ({ open, onOpenChange }) => {
+    const {user} =useAuth();
     const [privacy, setPrivacy] = useState('public');
     const [content, setContent] = useState('');
     const [mediaList, setMediaList] = useState([]); // [{ file, preview, type }]
@@ -92,12 +94,12 @@ const CreatePostModal = ({ open, onOpenChange }) => {
                     {/* Avatar + quyền riêng tư */}
                     <div className="flex items-center gap-3 mb-3">
                         <img
-                            src="/avatar-default.jpg"
+                            src={user?.avatar}
                             alt="avatar"
                             className="w-10 h-10 rounded-full object-cover"
                         />
                         <div>
-                            <div className="font-medium">Lại Hữu Lợi</div>
+                            <div className="font-medium">{user?.fullName}</div>
                             <div className="flex items-center text-sm text-gray-500 gap-1">
                                 {privacyIcons[privacy]}
                                 <Select value={privacy} onValueChange={setPrivacy}>
@@ -116,7 +118,7 @@ const CreatePostModal = ({ open, onOpenChange }) => {
 
                     {/* Nội dung bài viết */}
                     <Textarea
-                        placeholder="Lợi ơi, bạn đang nghĩ gì thế?"
+                        placeholder="Bạn đang nghĩ gì thế?"
                         className="min-h-[120px] resize-none text-base"
                         value={content}
                         onChange={(e) => setContent(e.target.value)}

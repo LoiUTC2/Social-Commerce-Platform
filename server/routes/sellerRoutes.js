@@ -4,8 +4,9 @@ const sellerController = require('../controllers/sellerController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
 // Các route cơ bản cho Seller
-router.post('/', sellerController.registerSeller);
+router.post('/', verifyToken, sellerController.registerSeller);
 router.get('/', sellerController.getAllSellers);
+router.get('/me', verifyToken, sellerController.getMySellerInfo);
 router.get('/:sellerId', sellerController.getSellerById);
 router.put('/:sellerId', verifyToken, requireRole('seller'), sellerController.updateSeller); //  Chỉ seller hoặc admin mới được cập nhật
 router.delete('/:sellerId', verifyToken, requireRole('admin'), sellerController.deleteSeller); // Có thể chỉ admin mới được xóa

@@ -6,7 +6,7 @@ export const createPost = async (postData) => {
     return res.data;
 };
 
-// 📥 Lấy danh sách bài viết (có thể phân trang sau này)
+// 📥 Lấy danh sách bài viết 
 export const getAllPosts = async (page = 1, limit = 5) => {
     const res = await api.get(`/posts?page=${page}&limit=${limit}`);
     return res.data;
@@ -15,6 +15,12 @@ export const getAllPosts = async (page = 1, limit = 5) => {
 // 📄 Lấy chi tiết 1 bài viết
 export const getPostById = async (postId) => {
     const res = await api.get(`/posts/${postId}`);
+    return res.data;
+};
+
+// 👤 Lấy danh sách bài viết theo ID tác giả (User hoặc Shop)
+export const getPostsByAuthorSlug = async (slug, page = 1, limit = 5) => {
+    const res = await api.get(`/posts/author/${slug}?page=${page}&limit=${limit}`);
     return res.data;
 };
 

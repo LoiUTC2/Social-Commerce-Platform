@@ -1,13 +1,12 @@
-import React from 'react';
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-} from '../ui/dialog';
+import { useNavigate } from 'react-router-dom';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/button';
+import { Send } from 'lucide-react';
 
+// [Grok] Modal hiển thị danh sách người đã thích bài viết, đồng bộ với backend và cải thiện giao diện
 const LikesListModal = ({ open, onOpenChange, likes = [] }) => {
+    const navigate = useNavigate();
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
@@ -16,28 +15,42 @@ const LikesListModal = ({ open, onOpenChange, likes = [] }) => {
             >
                 <DialogHeader className="border-b pb-2 mb-2">
                     <DialogTitle className="text-center text-lg font-semibold">
-                        Những người đã thích bài viết
+                        Những người đã thích bài viết ({likes.length})
                     </DialogTitle>
                 </DialogHeader>
 
                 {/* Danh sách người thích */}
-                <div className="max-h-96 overflow-y-auto space-y-3 mt-2">
+                <div className="max-h-96 overflow-y-auto space-y-2 mt-2">
                     {likes.length === 0 ? (
                         <div className="text-center text-gray-500 py-10">Chưa có ai thích bài viết này</div>
                     ) : (
                         likes.map((user) => (
-                            <div key={user?.id} className="flex items-center gap-3 p-2 rounded hover:bg-gray-100">
+                            <div
+                                key={user?._id}
+                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors duration-200"
+                            >
                                 <img
                                     src={user?.avatar || '/avatar-default.jpg'}
-                                    alt={user?.fullName}
-                                    className="w-10 h-10 rounded-full object-cover"
+                                    alt={user?.type === 'User' ? user?.fullName : user?.name}
+                                    className="w-10 h-10 rounded-full object-cover cursor-pointer"
+                                    onClick={() => navigate(`/profile/${user?._id}`)}
                                 />
                                 <div className="flex-1">
-                                    <div className="font-medium">{user?.fullName}</div>
-                                    {/* <div className="text-xs text-gray-400">Bạn bè</div> nếu sau này muốn thêm label */}
+                                    <div
+                                        className="font-medium text-sm cursor-pointer hover:underline"
+                                        onClick={() => navigate(`/profile/${user?._id}`)}
+                                    >
+                                        {user?.type === 'User' ? user?.fullName : user?.name || 'Người dùng'}
+                                    </div>
+                                    {/* [Grok] Dành sẵn chỗ cho label, ví dụ: Bạn bè */}
                                 </div>
-                                <Button size="sm" variant="outline">
-                                    Nhắn tin
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-blue-600 flex items-center gap-1"
+                                    onClick={() => navigate(`/messages/${user?._id}`)}
+                                >
+                                    <Send size={14} /> Nhắn tin
                                 </Button>
                             </div>
                         ))

@@ -1,5 +1,11 @@
 import api from '../utils/api';
 
+// Đăng ký người dùng
+export const registerUser = async (formData) => {
+  const response = await api.post('/auth/register', formData);
+  return response.data;
+};
+
 export const loginUser = async (email, password) => {
   const res = await api.post('/auth/login', { email, password });
   const { accessToken, user } = res.data.data;
@@ -38,7 +44,26 @@ export const logoutApi = async () => {
 };
 
 //Chuyển đổi tài khoản
-export const switchUserRole = async () => {
-  const response = await api.post('/shops/switchUserRole');
+export const switchUserRole = async () => { 
+  const response = await api.post('/shops/switch-role');
   return response.data.data;
 };
+
+// Lấy thông tin người dùng hiện tại (đã đăng nhập)
+export const getCurrentUser = async () => {
+  const res = await api.get('/auth/me');
+  return res.data;
+};
+
+// Lấy thông tin User theo slug
+export const getUserBySlug = async (slug) => {
+    const res = await api.get(`/auth/slug/${slug}`);
+    return res.data;
+};
+
+// Cập nhật thông tin cá nhân
+export const updateProfile = async (profileData) => {
+  const res = await api.put('/auth/me', profileData);
+  return res.data;
+};
+

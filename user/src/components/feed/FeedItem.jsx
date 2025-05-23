@@ -19,11 +19,15 @@ import { toast } from 'sonner';
 import { formatDistanceToNow, format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 
-
+// [Grok] Giả định component SharesListModal để hiển thị danh sách chia sẻ
+import SharesListModal from './SharesListModal';
 
 export default function FeedItem({ post }) {
-  const { _id, userId, content, images, videos, createdAt, likesCount = 0, commentsCount = 0, sharesCount = 0, sharedPost, privacy } = post;
+  const { _id, author, content, images, videos, createdAt, likesCount = 0, commentsCount = 0, sharesCount = 0, sharedPost, privacy } = post;
   const { user, setShowLoginModal } = useAuth();
+
+  const nameAuthor = author?.type === 'User' ? author?._id?.fullName : author?._id?.name;
+  const avatarAuthor = author?._id?.avatar;
 
   const [likes, setLikes] = useState(likesCount); // số lượng like
   const [liked, setLiked] = useState(false); // tuỳ chọn: theo dõi trạng thái đã like hay chưa
@@ -31,9 +35,10 @@ export default function FeedItem({ post }) {
 
   const [comments, setComments] = useState(commentsCount);
   const [shares, setShares] = useState(sharesCount);
+  const [sharesList, setSharesList] = useState([]); // [Grok] Thêm state để lưu danh sách chia sẻ
 
   const [openLikesModal, setOpenLikesModal] = useState(false);
-
+  const [openSharesModal, setOpenSharesModal] = useState(false); // [Grok] Thêm state cho modal danh sách chia sẻ
   const [openComment, setOpenComment] = useState(false);
   const [openShare, setOpenShare] = useState(false);
 
@@ -67,13 +72,15 @@ export default function FeedItem({ post }) {
   useEffect(() => {
     const fetchLikes = async () => {
       try {
+                console.log("slug:", author?._id?.slug);
+
         const res = await getPostLikes(_id);
         const likesData = res.data || [];
         setLikesList(likesData);
         setLikes(likesData.length);
         // Kiểm tra xem user hiện tại đã like bài viết chưa
         if (user) {
-          const userLiked = likesData.some(likeItem => likeItem?._id === user?._id);
+          const userLiked = likesData.some(likeItem => likeItem?._id === user?._id && likeItem?.type === (user?.role === 'seller' ? 'Shop' : 'User')); // [Grok] Kiểm tra cả _id và type
           setLiked(userLiked);
         }
       } catch (err) {
@@ -87,8 +94,9 @@ export default function FeedItem({ post }) {
     if (!user) return setShowLoginModal(true);
 
     try {
+      console.log("_id", _id)
       const res = await likePost(_id); // gọi API 
-      const likesCountFromDB = res.data;
+      const likesCountFromDB = res.data.likesCount; // [Grok] Lấy likesCount từ API
       setLikes(likesCountFromDB);
       if (res.message.includes('Đã thích')) {
         setLiked(true);
@@ -97,8 +105,10 @@ export default function FeedItem({ post }) {
         if (!userAlreadyLiked) {
           setLikesList(prev => [...prev, {
             _id: user?._id,
+            type: user?.role === 'seller' ? 'Shop' : 'User', // [Grok] Thêm type vào likesList
             fullName: user?.fullName,
-            avatar: user?.avatar
+            avatar: user?.avatar,
+            name: user?.role === 'seller' ? user?.shopName : undefined // [Grok] Thêm name nếu là Shop
           }]);
         }
       } else {
@@ -106,7 +116,7 @@ export default function FeedItem({ post }) {
         setLikesList(prev => prev.filter(like => like?._id !== user?._id)); // Xóa user hiện tại khỏi danh sách likes
       }
     } catch (err) {
-      console.error('Lỗi like bài viết:', err);
+      console.error('Lỗi like bài viết:', err.message);
     }
   };
 
@@ -116,7 +126,7 @@ export default function FeedItem({ post }) {
     try {
       const res = await getPostLikes(_id); // ✅ Gọi API
       const likesData = res.data || [];
-      setLikesList(likesData);// Lưu danh sách
+      setLikesList(likesData); // Lưu danh sách
       setLikes(likesData.length);
       setOpenLikesModal(true);
       console.log("like", res.data)
@@ -153,15 +163,15 @@ export default function FeedItem({ post }) {
 
     try {
       const res = await getPostShares(_id); // ✅ Gọi API
-      const likesData = res.data || [];
-      setLikesList(likesData);// Lưu danh sách
-      setLikes(likesData.length);
-      setOpenLikesModal(true);
-      console.log("like", res.data)
+      const sharesData = res.data.shares || []; // [Grok] Lấy shares từ API
+      setSharesList(sharesData); // [Grok] Lưu danh sách chia sẻ
+      setShares(sharesData.length);
+      setOpenSharesModal(true); // [Grok] Mở modal danh sách chia sẻ
+      console.log("shares", res.data)
     } catch (err) {
-      console.error('Lỗi khi lấy danh sách like:', err);
+      console.error('Lỗi khi lấy danh sách chia sẻ:', err);
     }
-  }
+  };
 
   // Kiểm tra có phải là bài viết được chia sẻ không
   const isSharedPost = post.type === 'share' && sharedPost;
@@ -172,7 +182,8 @@ export default function FeedItem({ post }) {
   const handleMessage = () => {
     if (!user) return setShowLoginModal(true);
     console.log('📨 Gửi tin nhắn cho Shop ABC');
-    // navigate(`/messages/${userId?._id}`);
+    // navigate(`/messages/${userId?._id}`); // [Grok] Cần cập nhật userId từ author._id._id
+    navigate(`/messages/${author?._id?._id}`); // [Grok] Sử dụng author._id._id để điều hướng đúng
   };
 
   return (
@@ -181,16 +192,15 @@ export default function FeedItem({ post }) {
         {/* Header */}
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <img src={userId?.avatar || '/avatar-default.jpg'} className="rounded-full w-10 h-10" onClick={() => navigate('/feed/profile')} alt="Profile" />
+            <img src={avatarAuthor || '/avatar-default.jpg'} className="rounded-full w-10 h-10" onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)} alt="Profile" />
             <div>
-              <p className="font-semibold">{userId?.fullName || 'Người dùng'}</p>
+              <p className="font-semibold cursor-pointer hover:underline" onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}>{nameAuthor || 'Người dùng'}</p>
               <div className="flex items-center gap-1 text-xs text-gray-500">
                 <span className='cursor-pointer' title={format(new Date(createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", { locale: vi })}>
                   {formatDistanceToNow(new Date(createdAt), { addSuffix: true, locale: vi }).replace(/^khoảng /, '')}
                 </span>
                 {renderPrivacyIcon(post?.privacy)}
               </div>
-
             </div>
           </div>
           <DropdownMenu>
@@ -216,12 +226,13 @@ export default function FeedItem({ post }) {
           <div className="border rounded-lg p-3 bg-gray-50">
             <div className="flex items-center gap-2 mb-2">
               <img
-                src={sharedPost.userId?.avatar || '/avatar-default.jpg'}
+                src={sharedPost.author?._id?.avatar || '/avatar-default.jpg'}
                 className="w-8 h-8 rounded-full"
+                onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
                 alt="Original author"
               />
               <div>
-                <p className="font-medium text-sm">{sharedPost.userId?.fullName || 'Người dùng'}</p>
+                <p className="font-medium text-sm cursor-pointer hover:underline" onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}>{sharedPost.author?._id?.fullName || sharedPost.author?._id?.name || 'Người dùng'}</p>
                 <div className="flex items-center gap-1 text-xs text-gray-500">
                   <span className='cursor-pointer' title={format(new Date(createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", { locale: vi })}>
                     {formatDistanceToNow(new Date(sharedPost?.createdAt), { addSuffix: true, locale: vi }).replace(/^khoảng /, '')}
@@ -269,7 +280,7 @@ export default function FeedItem({ post }) {
                     <div className="max-w-[200px]">
                       {likesList.slice(0, 5).map((user) => (
                         <div key={user?._id} className="truncate">
-                          {user?.fullName}
+                          {user?.type === 'User' ? user?.fullName : user?.name}
                         </div>
                       ))}
                       {likesList.length > 5 && (
@@ -287,10 +298,10 @@ export default function FeedItem({ post }) {
           {/* Số bình luận, chia sẻ, nhắn tin */}
           <div className="flex items-center gap-4">
             <span className='cursor-pointer hover:underline' onClick={handleComment}>{comments} bình luận</span>
-            <span className='cursor-pointer hover:underline' onClick={handleShare}>{shares} lượt chia sẻ</span>
+            <span className='cursor-pointer hover:underline' onClick={handleGetShareList}>{shares} lượt chia sẻ</span> {/* [Grok] Sửa để mở modal danh sách chia sẻ */}
 
             {/* Gửi tin nhắn */}
-            {user && user._id !== userId?._id && (
+            {user && user._id !== author?._id?._id && ( // [Grok] So sánh với author._id._id
               <Button
                 onClick={handleMessage}
                 size="sm"
@@ -321,7 +332,6 @@ export default function FeedItem({ post }) {
 
       <LikesListModal open={openLikesModal} onOpenChange={setOpenLikesModal} likes={likesList} />
       <CommentModal open={openComment} onClose={setOpenComment} postId={_id} />
-
       <SharePostModal
         open={openShare}
         onOpenChange={setOpenShare}
@@ -329,8 +339,7 @@ export default function FeedItem({ post }) {
         postIdToShare={postIdToShare} // Truyền ID của bài viết cần chia sẻ
         onShareCompleted={handleShareCompleted}
       />
+      <SharesListModal open={openSharesModal} onOpenChange={setOpenSharesModal} shares={sharesList} /> {/* [Grok] Thêm modal danh sách chia sẻ */}
     </Card>
-
   );
-
 }

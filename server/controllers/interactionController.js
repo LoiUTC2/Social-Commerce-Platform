@@ -4,10 +4,14 @@ const { successResponse, errorResponse } = require('../utils/response');
 
 exports.recordInteraction = async (req, res) => {
   try {
+    const actor = req.actor;
     const { targetType, targetId, action, metadata } = req.body;
 
     const interaction = new UserInteraction({
-      userId: req.user.userId,
+      author: {
+        type: actor.type === "user" ? "User" : "Shop",
+        _id: actor._id,
+      },
       targetType,
       targetId,
       action,

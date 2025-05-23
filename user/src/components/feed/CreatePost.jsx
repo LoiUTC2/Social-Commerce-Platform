@@ -4,8 +4,12 @@ import { Button } from '../ui/button';
 import { Video, Image, Smile } from 'lucide-react';
 import avatar from '../../assets/GIABAOAVT.jpg'
 import CreatePostModal from './CreatePostModal';
+import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 const CreatePost = () => {
+    const {user} = useAuth();
+    const navigate = useNavigate();
     const [open, setOpen] = useState(false);
 
     return (
@@ -13,9 +17,10 @@ const CreatePost = () => {
             <div className="bg-white rounded-xl shadow-sm p-4 space-y-3 cursor-pointer " onClick={() => setOpen(true)}>
                 <div className="flex items-center gap-3">
                     <img
-                        src={avatar}
+                        src={user?.avatar}
                         alt="user avatar"
                         className="w-10 h-10 rounded-full object-cover"
+                        onClick={() => navigate(`/feed/profile/${user?.slug}`)}
                     />
                     <Input
                         className="rounded-full bg-gray-100 px-4"

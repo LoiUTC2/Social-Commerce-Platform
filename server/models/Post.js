@@ -1,7 +1,15 @@
 const mongoose = require('mongoose');
 
 const postSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  // userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  author: {
+    type: {
+      type: String,
+      enum: ['User', 'Shop'],
+      required: true
+    },
+    _id: { type: mongoose.Schema.Types.ObjectId, required: true, refPath: 'author.type' } //refPath: 'author.type' cho phép Mongoose populate linh hoạt theo kiểu (User hoặc Shop).
+  },
   content: { type: String, required: true },
   images: [String],
   videos: [String],

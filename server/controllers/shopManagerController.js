@@ -30,8 +30,8 @@ exports.approveCreateShop = async (req, res) => {
         await shop.save();
 
         // Cập nhật user
-        existingUser.roles.push('seller');
-        await existingUser.save();
+        ownerUser.roles.push('seller');
+        await ownerUser.save();
 
         return successResponse(res, 'Đã duyệt shop thành công', shop);
     } catch (error) {

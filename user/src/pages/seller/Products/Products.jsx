@@ -5,12 +5,14 @@ import { Input } from '../../../components/ui/input';
 import { Card, CardContent } from '../../../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '../../../components/ui/pagination';
+import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious, PaginationEllipsis } from '../../../components/ui/pagination';
 import { Package, Search, PlusCircle, Download, MoreVertical, Edit, Trash2, CheckCircle, XCircle, Eye, RefreshCw, Copy } from 'lucide-react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../../components/ui/dropdown-menu'; import { Badge } from '../../../components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../../components/ui/dropdown-menu';
+import { Badge } from '../../../components/ui/badge';
 import { Checkbox } from '../../../components/ui/checkbox';
 import { toast } from 'sonner';
-import { toggleProductActiveStatus, deleteProduct, getAllProductsToShopForSeller } from '../../../services/productService';
+import { toggleProductStatus, deleteProduct, getProductsByShopForSeller } from '../../../services/productService';
+import { getCategoryTree } from '../../../services/categoryService';
 import { useAuth } from '../../../contexts/AuthContext';
 
 // Format currency
@@ -21,14 +23,46 @@ const formatCurrency = (amount) => {
   }).format(amount);
 };
 
+// Tìm đường dẫn danh mục dựa trên _id
+const findCategoryPath = (categoryId, categories) => {
+  if (!Array.isArray(categories)) {
+    console.error('Categories is not an array:', categories);
+    return 'Không xác định';
+  }
+  for (const cat of categories) {
+    if (cat._id === categoryId) return cat.name;
+    if (Array.isArray(cat.children)) {
+      for (const child of cat.children) {
+        if (child._id === categoryId) return `${cat.name} > ${child.name}`;
+        if (Array.isArray(child.children)) {
+          for (const grandchild of child.children) {
+            if (grandchild._id === categoryId) {
+              const path = `${cat.name} > ${child.name} > ${grandchild.name}`;
+              console.log('Product PATH maincategory:', path);
+              return path;
+            }
+          }
+        } else {
+          console.warn(`Child "${child.name}" has invalid children:`, child.children);
+        }
+      }
+    } else {
+      console.warn(`Category "${cat.name}" has invalid children:`, cat.children);
+    }
+  }
+  console.warn(`Category ID "${categoryId}" not found in categories`);
+  return 'Không xác định';
+};
+
 export default function Products() {
   const navigate = useNavigate();
   const { user, setShowLoginModal } = useAuth();
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all'); // Thay đổi khởi tạo từ '' thành 'all'
+  const [filterStatus, setFilterStatus] = useState('all');
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 10,
@@ -36,14 +70,35 @@ export default function Products() {
     totalPages: 1,
   });
   const [loading, setLoading] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(null); //hiển thị loading khi đang cập nhật trạng thái
+  const [updatingStatus, setUpdatingStatus] = useState(null);
+
+  // Lấy danh mục từ API
+  const fetchCategories = async () => {
+    try {
+      const response = await getCategoryTree();
+      const normalizedCategories = (response.data || []).map(cat => ({
+        ...cat,
+        children: Array.isArray(cat.children)
+          ? cat.children.map(child => ({
+              ...child,
+              children: Array.isArray(child.children) ? child.children : []
+            }))
+          : []
+      }));
+      console.log('Normalized categories:', normalizedCategories);
+      setCategories(normalizedCategories);
+    } catch (error) {
+      toast.error('Lỗi', { description: 'Không thể lấy danh mục.' });
+      console.error('Lỗi khi lấy danh mục:', error);
+    }
+  };
 
   // Lấy danh sách sản phẩm từ API
   const fetchProducts = async (page = 1) => {
     if (!user) return setShowLoginModal(true);
     setLoading(true);
     try {
-      const response = await getAllProductsToShopForSeller(user._id, {
+      const response = await getProductsByShopForSeller(user._id, {
         page,
         limit: pagination.limit,
       });
@@ -55,72 +110,70 @@ export default function Products() {
         totalPages: response.data.pagination.totalPages,
       });
     } catch (error) {
-      toast('Lỗi',
-        { description: 'Không thể lấy danh sách sản phẩm. Vui lòng thử lại sau.', }
-      );
+      toast.error('Lỗi', { description: 'Không thể lấy danh sách sản phẩm.' });
       console.error('Lỗi khi lấy sản phẩm:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Gọi API khi component mount hoặc khi page thay đổi
+  // Gọi API khi component mount
   useEffect(() => {
+    fetchCategories();
     fetchProducts(pagination.page);
   }, [pagination.page]);
 
   // Handle refresh button
   const handleRefresh = () => {
+    fetchCategories();
     fetchProducts(pagination.page);
-    toast.info('Đã làm mới danh sách sản phẩm.');
+    toast.info('Đã làm mới danh sách sản phẩm và danh mục.');
   };
 
-  // Handle status change for a product
+  // Handle status change
   const handleStatusChange = async (productId) => {
     setUpdatingStatus(productId);
     try {
-      const res = await toggleProductActiveStatus(productId);
-      const isActive = res.data.isActive;
+      const res = await toggleProductStatus(productId);
       toast.success('Thành công', {
-        description: `Cập nhật trạng thái sản phẩm thành ${isActive ? 'Đang bán' : 'Ngừng bán'}.`,
+        description: `Cập nhật trạng thái thành ${res.data.isActive ? 'Đang bán' : 'Ngừng bán'}.`,
       });
-      // Cập nhật lại danh sách sản phẩm
       fetchProducts(pagination.page);
     } catch (error) {
-      toast.error('Lỗi', {
-        description: 'Cập nhật trạng thái thất bại. Vui lòng thử lại sau.',
-      });
+      toast.error('Lỗi', { description: 'Cập nhật trạng thái thất bại.' });
       console.error('Lỗi khi cập nhật trạng thái:', error);
     } finally {
       setUpdatingStatus(null);
     }
   };
 
-  // Handle selection of all products
+  // Handle selection
   const handleSelectAll = (checked) => {
     if (checked) {
-      setSelectedProducts(products.map(product => product._id));
+      setSelectedProducts(filteredProducts.map(product => product._id));
     } else {
       setSelectedProducts([]);
     }
   };
 
-  // Handle selection of a single product
   const handleSelectProduct = (productId) => {
-    if (selectedProducts.includes(productId)) {
-      setSelectedProducts(selectedProducts.filter(id => id !== productId));
-    } else {
-      setSelectedProducts([...selectedProducts, productId]);
-    }
+    setSelectedProducts(prev =>
+      prev.includes(productId)
+        ? prev.filter(id => id !== productId)
+        : [...prev, productId]
+    );
   };
 
-  // Filter products based on search and filters
+  // Filter products
   const filteredProducts = products.filter(product => {
     const matchesSearch = searchQuery === '' ||
       product.name.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesCategory = filterCategory === 'all' || product.category.includes(filterCategory);
-    const matchesStatus = filterStatus === 'all' || (filterStatus === 'active' ? product.isActive : !product.isActive);
+    const matchesCategory = filterCategory === 'all' ||
+      product.categories?.some(category => category.name === filterCategory);
+
+    const matchesStatus = filterStatus === 'all' ||
+      (filterStatus === 'active' ? product.isActive : !product.isActive);
 
     return matchesSearch && matchesCategory && matchesStatus;
   });
@@ -135,60 +188,53 @@ export default function Products() {
   // Handle delete product
   const handleDeleteProduct = async (productId) => {
     try {
-      await deleteProduct(productId, 'hard'); //xóa mất luôn khỏi db
-      toast.success("Thành công", {
-        description: 'Xóa sản phẩm thành công.',
-      });
+      await deleteProduct(productId, 'hard');
+      toast.success('Thành công', { description: 'Xóa sản phẩm thành công.' });
       fetchProducts(pagination.page);
     } catch (error) {
-      toast.error("Lỗi", {
-        description: 'Xóa sản phẩm thất bại. Vui lòng thử lại sau.',
-      });
+      toast.error('Lỗi', { description: 'Xóa sản phẩm thất bại.' });
       console.error('Lỗi khi xóa sản phẩm:', error);
     }
   };
 
-  // Handle delete selected products
+  // Handle delete selected
   const handleDeleteSelected = async () => {
     try {
       await Promise.all(selectedProducts.map(id => deleteProduct(id, 'hard')));
-      toast.success("Thành công", {
-        description: `Đã xóa ${selectedProducts.length} sản phẩm`,
-      });
+      toast.success('Thành công', { description: `Đã xóa ${selectedProducts.length} sản phẩm.` });
       setSelectedProducts([]);
       fetchProducts(pagination.page);
     } catch (error) {
-      toast.error("Lỗi", {
-        description: 'Xóa sản phẩm thất bại. Vui lòng thử lại sau.',
-      });
+      toast.error('Lỗi', { description: 'Xóa sản phẩm thất bại.' });
       console.error('Lỗi khi xóa nhiều sản phẩm:', error);
     }
   };
 
-  // Danh mục sản phẩm từ backend (có thể gọi API để lấy, hiện tại dùng mock)
-  const productCategories = [
-    // 'Thời trang',
-    // 'Thời trang nữ',
-    // 'Đồ điện tử',
-    // 'Đồ gia dụng',
-    // 'Sách & Văn phòng phẩm',
-    // 'Sức khỏe & Làm đẹp',
-    "Điện thoại", "Laptop", "Tablet", "Phụ kiện", "Máy ảnh", "Thời trang", "Thể thao",
-    "Sneakers", "Đồng hồ", "Mỹ phẩm", "Nước hoa", "Đồ gia dụng", "Nội thất", "Công nghệ", "Gaming", "Đồ ăn",
-    "Đồ uống", "Sách", "Đồ chơi", "Xe cộ", "Âm thanh", "Máy tính bảng", "Flagship", "Nhiếp ảnh"
-  ];
-  //Nay mai lấy API lấy ra catgory
-  // useEffect(() => {
-  //   const fetchCategories = async () => {
-  //     try {
-  //       const response = await api.get('/categories');
-  //       setProductCategories(response.data);
-  //     } catch (error) {
-  //       console.error('Lỗi khi lấy danh mục:', error);
-  //     }
-  //   };
-  //   fetchCategories();
-  // }, []);
+  // Lấy danh sách danh mục phẳng cho bộ lọc
+  const flatCategories = [];
+  const seenNames = new Set();
+  categories.forEach(cat => {
+    if (!seenNames.has(cat.name)) {
+      flatCategories.push({ name: cat.name, level: cat.level, productCount: cat.productCount });
+      seenNames.add(cat.name);
+    }
+    if (cat.children) {
+      cat.children.forEach(child => {
+        if (!seenNames.has(child.name)) {
+          flatCategories.push({ name: child.name, level: child.level, productCount: child.productCount });
+          seenNames.add(child.name);
+        }
+        if (child.children) {
+          child.children.forEach(grandchild => {
+            if (!seenNames.has(grandchild.name)) {
+              flatCategories.push({ name: grandchild.name, level: grandchild.level, productCount: grandchild.productCount });
+              seenNames.add(grandchild.name);
+            }
+          });
+        }
+      });
+    }
+  });
 
   return (
     <div className="space-y-6">
@@ -196,7 +242,6 @@ export default function Products() {
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Package className="w-6 h-6" /> Quản lý sản phẩm
         </h1>
-
         <Button onClick={() => navigate('/seller/add-product')} className="bg-pink-500 hover:bg-pink-600">
           <PlusCircle className="w-4 h-4 mr-2" /> Thêm sản phẩm
         </Button>
@@ -215,40 +260,37 @@ export default function Products() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-
             <div className="flex gap-2">
               <Select value={filterCategory} onValueChange={setFilterCategory}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Danh mục" />
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Danh mục">{filterCategory !== 'all' ? filterCategory : 'Danh mục'}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tất cả danh mục</SelectItem>
-                  {productCategories.map((category) => (
-                    <SelectItem key={category} value={category}>
-                      {category}
+                  {flatCategories.map((category, index) => (
+                    <SelectItem key={`${category.name}-${index}`} value={category.name}>
+                      <span className={category.level > 1 ? `pl-${(category.level - 1) * 4}` : ''}>
+                        {category.level > 1 ? `➥ ${category.name}` : `⚫ ${category.name}`} ({category.productCount || 0})
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-
               <Select value={filterStatus} onValueChange={setFilterStatus}>
                 <SelectTrigger className="w-[150px]">
                   <SelectValue placeholder="Trạng thái" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Tất cả</SelectItem> {/* Thay value="" bằng "all" */}
+                  <SelectItem value="all">Tất cả</SelectItem>
                   <SelectItem value="active">Đang bán</SelectItem>
                   <SelectItem value="inactive">Ngừng bán</SelectItem>
                 </SelectContent>
               </Select>
-
               <Button variant="outline" size="sm" onClick={handleRefresh}>
                 <RefreshCw className="w-4 h-4 mr-2" /> Làm mới
               </Button>
             </div>
           </div>
-
-          {/* Bulk Actions */}
           {selectedProducts.length > 0 && (
             <div className="mt-4 flex items-center gap-2 p-2 bg-blue-50 rounded border border-blue-100">
               <span className="text-sm font-medium mr-2">
@@ -279,8 +321,8 @@ export default function Products() {
                 <TableRow>
                   <TableHead className="w-10">
                     <Checkbox
-                      checked={selectedProducts?.length === filteredProducts?.length && filteredProducts?.length > 0}
-                      onCheckedChange={(checked) => handleSelectAll(checked)}
+                      checked={filteredProducts.length > 0 && filteredProducts.every(product => selectedProducts.includes(product._id))}
+                      onCheckedChange={handleSelectAll}
                       aria-label="Chọn tất cả"
                     />
                   </TableHead>
@@ -289,7 +331,7 @@ export default function Products() {
                   <TableHead className="max-w-[150px]">SKU</TableHead>
                   <TableHead className="max-w-[150px]">Giá bán</TableHead>
                   <TableHead className="max-w-[100px]">Tồn kho</TableHead>
-                  <TableHead className="max-w-[150px]">Danh mục</TableHead>
+                  <TableHead className="max-w-[200px]">Danh mục</TableHead>
                   <TableHead className="max-w-[120px]">Trạng thái</TableHead>
                   <TableHead className="text-right">Thao tác</TableHead>
                 </TableRow>
@@ -327,8 +369,11 @@ export default function Products() {
                           className="w-10 h-10 object-cover rounded-md"
                         />
                       </TableCell>
-                      <TableCell className="font-medium max-w-[400px] whitespace-normal break-words"><span title={product.name}>{product.name}</span></TableCell>
-                      <TableCell className="text-sm text-gray-600">{product.sku || 'N/A'}
+                      <TableCell className="font-medium max-w-[400px] whitespace-normal break-words">
+                        <span title={product.name}>{product.name}</span>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-600">
+                        {product.sku || 'N/A'}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -360,12 +405,16 @@ export default function Products() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{product.category} </Badge>
+                        <Badge variant="outline">
+                          {product.mainCategory?._id
+                            ? findCategoryPath(product.mainCategory._id, categories)
+                            : 'Không xác định'}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <Select
                           value={product.isActive ? 'active' : 'inactive'}
-                          onValueChange={(newStatus) => handleStatusChange(product._id)}
+                          onValueChange={() => handleStatusChange(product._id)}
                           disabled={updatingStatus === product._id}
                         >
                           <SelectTrigger className="w-[120px]">
@@ -385,7 +434,6 @@ export default function Products() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -394,14 +442,14 @@ export default function Products() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem className="flex items-center" onClick={() => navigate(`/seller/product-detail/${product.slug}`)}>
+                            <DropdownMenuItem onClick={() => navigate(`/seller/product-detail/${product.slug}`)}>
                               <Eye className="w-4 h-4 mr-2" /> Xem chi tiết
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="flex items-center" onClick={() => navigate(`/seller/edit-product/${product.slug}`)}>
+                            <DropdownMenuItem onClick={() => navigate(`/seller/edit-product/${product.slug}`)}>
                               <Edit className="w-4 h-4 mr-2" /> Chỉnh sửa
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              className="flex items-center text-red-500"
+                              className="text-red-500"
                               onClick={() => handleDeleteProduct(product._id)}
                             >
                               <Trash2 className="w-4 h-4 mr-2" /> Xóa
@@ -415,8 +463,6 @@ export default function Products() {
               </TableBody>
             </Table>
           </div>
-
-          {/* Pagination */}
           <div className="p-4 border-t">
             <Pagination>
               <PaginationContent>
@@ -445,7 +491,7 @@ export default function Products() {
                     (page === pagination.page - 2 && pagination.page > 3) ||
                     (page === pagination.page + 2 && pagination.page < pagination.totalPages - 2)
                   ) {
-                    return <PaginationEllipsis key={page} />;
+                    return <PaginationItem key={page}><PaginationEllipsis /></PaginationItem>;
                   }
                   return null;
                 })}

@@ -51,9 +51,24 @@ export function AuthProvider({ children }) {
         setShowLoginModal(false);
     };
 
-    const userDataSwitchAfter = (userData) => {
+    const switchRole = async () => {
+        try {
+            const response = await switchUserRole();
+            if (response) {
+                setUser(response.user);
+                console.log("Thông tin sau khi chuyển Account:", response);
+                console.log("UserData sau khi chuyển Account:", response.user);
+                return response;
+            }
+        } catch (error) {
+            console.error('Lỗi khi chuyển đổi vai trò:', error);
+            throw error;
+        }
+    };
+
+    const userDataLatest = (userData) => {
         setUser(userData);
-        console.log("UserData sau khi chuyển Account:", userData);
+        console.log("UserData mới nhất:", userData);
     };
 
     const logout = async () => {
@@ -73,6 +88,7 @@ export function AuthProvider({ children }) {
     const isSeller = user?.role === 'seller'; //người dùng hiện tại đang dùng tài khoản seller
     const isAdmin = user?.role === 'admin';
     const sellerSubscribed = !!user?.roles.includes("seller"); //kiểm tra xem người dùng đã đăng kí seller chưa
+    const sellerStatusPending = !!user?.shopId && !user?.roles.includes("seller"); //kiểm tra trạng thái duyệt đăng kí seller (đang đợi duyệt là true)
 
     return (
         <AuthContext.Provider value={{
@@ -80,7 +96,8 @@ export function AuthProvider({ children }) {
             user,
             login,
             logout,
-            userDataSwitchAfter,
+            switchRole,
+            userDataLatest,
             showLoginModal,
             setShowLoginModal,
             loading,
@@ -88,6 +105,7 @@ export function AuthProvider({ children }) {
             isSeller,
             isAdmin,
             sellerSubscribed,
+            sellerStatusPending,
         }}>
             {loading ? <div>Loading...</div> : children}
         </AuthContext.Provider>

@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const tokenService = require('../utils/tokenService');
 const { successResponse, errorResponse } = require('../utils/response');
+const Shop = require('../models/Shop');
 
 const sendTokenCookies = (res, accessToken, refreshToken) => {
     // Access Token
@@ -24,17 +25,128 @@ const sendTokenCookies = (res, accessToken, refreshToken) => {
 
 exports.register = async (req, res) => {
     try {
-        const { fullName, email, password } = req.body;
+        const { fullName, email, password, gender, dateOfBirth, phone } = req.body;
+
         const existingUser = await User.findOne({ email });
-        if (existingUser) return res.status(400).json({ message: 'Email đã tồn tại' });
+        if (existingUser) return errorResponse(res, 'Email đã tồn tại', 400);
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = new User({ fullName, email, password: hashedPassword });
+
+        const newUser = new User({
+            fullName,
+            email,
+            password: hashedPassword,
+            gender: gender || "other",
+            dateOfBirth,
+            phone,
+            roles: ['buyer'],
+            role: 'buyer',
+            ip: req.ip,
+            userAgent: req.headers['user-agent'],
+        });
+
         await newUser.save();
 
-        res.status(201).json({ message: 'Đăng ký thành công' });
+        return successResponse(res, 'Đăng ký thành công', {
+            userId: newUser._id,
+            email: newUser.email,
+            fullName: newUser.fullName
+        }, 201);
     } catch (err) {
-        res.status(500).json({ message: 'Lỗi server', error: err.message });
+        return errorResponse(res, 'Lỗi server khi đăng ký', 500, err.message);
+    }
+};
+
+exports.updateProfile = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const updates = req.body;
+
+        const allowedFields = [
+            'fullName',
+            'avatar',
+            'coverImage',
+            'bio',
+            'phone',
+            'gender',
+            'dateOfBirth',
+            'address'
+        ];
+
+        const sanitizedUpdates = {};
+        for (const key of allowedFields) {
+            if (updates[key] !== undefined) {
+                sanitizedUpdates[key] = updates[key];
+            }
+        }
+
+        sanitizedUpdates.updatedAt = new Date();
+
+        const updatedUser = await User.findByIdAndUpdate(userId, sanitizedUpdates, { new: true });
+
+        if (!updatedUser) {
+            return errorResponse(res, 'Không tìm thấy người dùng', 404);
+        }
+
+        const data = {
+            _id: updatedUser._id,
+            fullName: updatedUser.fullName,
+            slug: updatedUser.slug,
+            email: updatedUser.email,
+            avatar: updatedUser.avatar,
+            coverImage: updatedUser.coverImage,
+            bio: updatedUser.bio,
+            phone: updatedUser.phone,
+            gender: updatedUser.gender,
+            dateOfBirth: updatedUser.dateOfBirth,
+            address: updatedUser.address,
+            email: updatedUser.email,
+            roles: updatedUser.roles,
+            role: updatedUser.role,
+            shopId: updatedUser.shopId,
+        };
+        return successResponse(res, 'Cập nhật thông tin cá nhân thành công', data);
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi cập nhật thông tin người dùng', 500, err.message);
+    }
+};
+
+exports.getCurrentUser = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+
+        const user = await User.findById(userId).select(
+            'fullName email avatar coverImage bio phone gender dateOfBirth address role roles currentRole shopId isSellerActive followers following savedPosts likedPosts likedComments createdAt updatedAt'
+        ).populate('shopId', 'name avatar slug isApproved');
+
+        if (!user) {
+            return errorResponse(res, 'Không tìm thấy người dùng', 404);
+        }
+
+        return successResponse(res, 'Lấy thông tin người dùng thành công', user);
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi lấy thông tin người dùng', 500, err.message);
+    }
+};
+
+exports.getUserBySlug = async (req, res) => {
+    const { slug } = req.params;
+
+    try {
+        const user = await User.findOne({ slug })
+            .select('-password -refreshToken -refreshTokenUsage -ip -userAgent')
+            .populate('shopId', 'name avatar logo coverImage')
+            .populate('sellerId')
+            .populate('followers', 'fullName avatar')
+            .populate('following', 'fullName avatar');
+
+        if (!user) {
+            return errorResponse(res, 'Không tìm thấy người dùng', 404);
+        }
+
+        return successResponse(res, 'Lấy thông tin người dùng thành công', user);
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi lấy thông tin người dùng', 500, err.message);
     }
 };
 
@@ -62,17 +174,42 @@ exports.login = async (req, res) => {
 
         sendTokenCookies(res, accessToken, refreshToken);
 
-        const data = {
-            accessToken,
-            user: {
+        // Lấy thông tin của user, coi thử họ đang ở vai trò nào thì đăng nhập vào với thông tin đó
+        let actor = null;
+        if (user.role === 'seller' && user.shopId) {
+            const shop = await Shop.findById(user.shopId).populate('seller');
+            if (!shop) return errorResponse(res, 'Không tìm thấy shop', 404);
+
+            actor = {
+                _id: shop._id,
+                type: 'shop',
+                fullName: shop.name,
+                slug: shop.slug,
+                avatar: shop.avatar,
+                sellerId: shop.seller?._id,
+                legalName: shop.seller?.legalName,
+                email: shop.contact.email,
+                roles: user.roles,
+                role: user.role,
+                shopId: user.shopId,
+            };
+        } else {
+            actor = {
                 _id: user._id,
+                type: 'user',
                 fullName: user.fullName,
+                slug: user.slug,
+                avatar: user.avatar,
                 email: user.email,
                 roles: user.roles,
                 role: user.role,
                 shopId: user.shopId,
-                isSellerActive: user.isSellerActive,
-            }
+            };
+        }
+
+        const data = {
+            accessToken,
+            user: actor
         };
         successResponse(res, "Đăng nhập thành công.", data)
     } catch (err) {
@@ -120,16 +257,42 @@ exports.refreshToken = async (req, res) => {
 
         sendTokenCookies(res, newAccessToken, newRefreshToken);
 
-        res.json({
-            accessToken: newAccessToken,
-            user: {
+        // Lấy thông tin của user, coi thử họ đang ở vai trò nào thì lấy thông tin đó
+        let actor = null;
+        if (user.role === 'seller' && user.shopId) {
+            const shop = await Shop.findById(user.shopId).populate('seller');
+            if (!shop) return errorResponse(res, 'Không tìm thấy shop', 404);
+
+            actor = {
+                _id: shop._id,
+                type: 'shop',
+                fullName: shop.name,
+                slug: shop.slug,
+                avatar: shop.avatar,
+                sellerId: shop.seller?._id,
+                legalName: shop.seller?.legalName,
+                email: shop.contact.email,
+                roles: user.roles,
+                role: user.role,
+                shopId: user.shopId,
+            };
+        } else {
+            actor = {
                 _id: user._id,
+                type: 'user',
                 fullName: user.fullName,
+                slug: user.slug,
+                avatar: user.avatar,
                 email: user.email,
                 roles: user.roles,
                 role: user.role,
                 shopId: user.shopId,
-            }
+            };
+        }
+
+        res.json({
+            accessToken: newAccessToken,
+            user: actor,
         });
         // res.json({accessToken: newAccessToken });
     } catch (err) {
