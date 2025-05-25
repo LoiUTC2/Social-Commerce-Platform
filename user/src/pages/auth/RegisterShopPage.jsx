@@ -144,13 +144,13 @@ const RegisterShopPage = () => {
         const response = await getCategoryTree()
         if (response.success) {
           // Flatten category tree for easier selection
-          const flattenCategories = flattenCategoryTree(response.data)
+          const flattenCategories = flattenCategoryTree(response.data.tree)
           setCategories(flattenCategories)
         } else {
           toast.error("Không thể tải danh mục sản phẩm")
         }
       } catch (error) {
-        console.error("Error fetching categories:", error)
+        console.error("Error fetching categories:", error.message)
         toast.error("Lỗi khi tải danh mục sản phẩm")
       } finally {
         setIsLoadingCategories(false)

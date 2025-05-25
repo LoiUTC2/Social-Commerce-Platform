@@ -76,7 +76,7 @@ export default function Products() {
   const fetchCategories = async () => {
     try {
       const response = await getCategoryTree();
-      const normalizedCategories = (response.data || []).map(cat => ({
+      const normalizedCategories = (response.data.tree || []).map(cat => ({
         ...cat,
         children: Array.isArray(cat.children)
           ? cat.children.map(child => ({

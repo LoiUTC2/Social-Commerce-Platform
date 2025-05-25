@@ -9,7 +9,7 @@ import PlaceMarketPage from '../pages/marketplace/PlaceMarketPage';
 const MarketplaceRoutes = (
   <Route path="/marketplace" element={<MainLayout />}>
     <Route index element={<PlaceMarketPage/>} />
-    <Route path="/marketplace/products/:productId" element={<ProductDetail />} />
+    <Route path="/marketplace/products/:slug" element={<ProductDetail />} />
     <Route path="/marketplace/cart" element={<CartPage />} />
     <Route path="/marketplace/checkout" element={<CheckoutPage />} />
   </Route>

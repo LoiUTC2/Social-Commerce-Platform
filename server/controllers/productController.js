@@ -4,6 +4,7 @@ const { successResponse, errorResponse } = require('../utils/response');
 const slugify = require("slugify");
 const mongoose = require('mongoose');
 const Category = require('../models/Category');
+const Post = require('../models/Post');
 
 
 //Tạo slug khác biệt
@@ -327,6 +328,104 @@ exports.toggleProductActiveStatus = async (req, res) => {
     }
 };
 
+// Bật/tắt cho phép đăng bài viết kèm sản phẩm
+exports.toggleAllowPosts = async (req, res) => {
+    try {
+        const { productId } = req.params;
+        const userId = req.actor._id.toString();
+
+        // Tìm sản phẩm và kiểm tra quyền sở hữu
+        const product = await Product.findOne({
+            _id: productId,
+            seller: userId
+        });
+
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền thay đổi', 404);
+        }
+
+        // Chuyển đổi trạng thái allowPosts
+        product.allowPosts = !product.allowPosts;
+        await product.save();
+
+        // Ghi lại hành vi thay đổi (nếu cần)
+        await UserInteraction.create({
+            author: {
+                type: "Shop",
+                _id: userId
+            },
+            targetType: 'product',
+            targetId: product._id,
+            action: 'toggle_allow_posts',
+            metadata: {
+                allowPosts: product.allowPosts
+            }
+        });
+
+        const statusText = product.allowPosts
+            ? 'Đã bật chức năng đăng bài viết cho sản phẩm'
+            : 'Đã tắt chức năng đăng bài viết cho sản phẩm';
+
+        return successResponse(res, statusText, {
+            allowPosts: product.allowPosts,
+            productId: product._id
+        });
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi thay đổi trạng thái allowPosts', 500, error.message);
+    }
+};
+
+// Lấy danh sách sản phẩm nổi bật cho phép đăng bài viết (allowPosts: true)
+exports.getFeaturedProductsForPosts = async (req, res) => {
+    const { page = 1, limit = 10, search } = req.query;
+    const parsedLimit = parseInt(limit);
+    const skipCount = (parseInt(page) - 1) * parsedLimit;
+
+    try {
+        // Xây dựng query cơ bản
+        const query = { 
+            isActive: true,
+            allowPosts: true
+        };
+
+        // Thêm điều kiện tìm kiếm nếu có
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { description: { $regex: search, $options: 'i' } },
+                { tags: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        // Lấy danh sách sản phẩm
+        const products = await Product.find(query)
+            .populate('seller', 'shopName avatar') // Thông tin shop
+            .populate('mainCategory', 'name slug') // Thông tin danh mục
+            .sort({ 
+                soldCount: -1,       // Ưu tiên sản phẩm bán chạy
+                'ratings.avg': -1,   // Ưu tiên sản phẩm đánh giá cao
+                createdAt: -1        // Ưu tiên sản phẩm mới
+            })
+            .skip(skipCount)
+            .limit(parsedLimit);
+
+        // Đếm tổng số sản phẩm phù hợp
+        const total = await Product.countDocuments(query);
+
+        return successResponse(res, 'Danh sách sản phẩm cho phép đăng bài viết', {
+            products,
+            pagination: {
+                page: parseInt(page),
+                limit: parsedLimit,
+                total,
+                totalPages: Math.ceil(total / parsedLimit)
+            }
+        });
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi lấy danh sách sản phẩm', 500, error.message);
+    }
+};
+
 // Lấy danh sách sản phẩm nổi bật (dựa vào soldCount và rating)
 exports.getFeaturedProducts = async (req, res) => {
     const { page = 1, limit = 20, category } = req.query;
@@ -550,7 +649,7 @@ exports.getProductDetailForUser = async (req, res) => {
             slug: slug,
             isActive: true
         })
-            .populate('seller', 'username avatar shopName')
+            .populate('seller', 'name avatar slug')
             .populate('mainCategory', 'name slug')
             .populate('categories', 'name slug');
 
@@ -564,7 +663,7 @@ exports.getProductDetailForUser = async (req, res) => {
             _id: { $ne: product._id },
             isActive: true
         })
-            .populate('seller', 'username shopName')
+            .populate('seller', 'name avatar slug')
             .sort({ 'ratings.avg': -1 })
             .limit(6);
 
@@ -676,7 +775,7 @@ exports.getProductsByShopForShop = async (req, res) => {
     }
 };
 
-//Lấy chi tiết sản phẩm cho seller
+// Lấy chi tiết sản phẩm cho seller
 exports.getProductDetailForSeller = async (req, res) => {
     try {
         const { slug } = req.params;
@@ -714,7 +813,7 @@ exports.getProductDetailForSeller = async (req, res) => {
     }
 };
 
-//  * Tìm kiếm sản phẩm bằng slug
+// Tìm kiếm sản phẩm bằng slug
 exports.getProductBySlug = async (req, res) => {
     try {
         const { slug } = req.params;
@@ -756,5 +855,127 @@ exports.getProductBySlug = async (req, res) => {
         return successResponse(res, 'Lấy thông tin sản phẩm thành công', product);
     } catch (error) {
         return errorResponse(res, 'Lỗi khi lấy thông tin sản phẩm', 500, error.message);
+    }
+};
+
+// Lấy danh sách bài viết của sản phẩm
+exports.getProductPosts = async (req, res) => {
+    try {
+        const { productId } = req.params;
+        const { page = 1, limit = 10 } = req.query;
+        const skipCount = (parseInt(page) - 1) * parseInt(limit);
+
+        // Kiểm tra sản phẩm tồn tại
+        const product = await Product.findById(productId)
+            .populate('posts', 'content images videos likesCount commentsCount createdAt')
+            .populate({
+                path: 'posts',
+                populate: {
+                    path: 'author._id',
+                    select: 'username avatar shopName'
+                }
+            });
+
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm', 404);
+        }
+
+        // Phân trang danh sách bài viết
+        const posts = product.posts.slice(skipCount, skipCount + parseInt(limit));
+        const total = product.posts.length;
+
+        return successResponse(res, 'Danh sách bài viết của sản phẩm', {
+            posts,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                totalPages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi lấy danh sách bài viết', 500, error.message);
+    }
+};
+
+// Thêm bài viết vào sản phẩm
+exports.addPostToProduct = async (req, res) => {
+    try {
+        const { productId } = req.params;
+        const { postId } = req.body;
+        const actorId = req.actor._id;
+
+        // Kiểm tra sản phẩm tồn tại và thuộc quyền sở hữu
+        const product = await Product.findOne({
+            _id: productId,
+            seller: actorId
+        });
+
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền', 404);
+        }
+
+        // Kiểm tra bài viết tồn tại
+        const post = await Post.findById(postId);
+        if (!post) {
+            return errorResponse(res, 'Bài viết không tồn tại', 404);
+        }
+
+        // Kiểm tra bài viết đã thuộc sản phẩm chưa
+        if (product.posts.includes(postId)) {
+            return errorResponse(res, 'Bài viết đã được thêm vào sản phẩm trước đó', 400);
+        }
+
+        // Thêm bài viết vào sản phẩm
+        product.posts.push(postId);
+        await product.save();
+
+        // Cập nhật productIds trong Post
+        if (!post.productIds.includes(productId)) {
+            post.productIds.push(productId);
+            await post.save();
+        }
+
+        return successResponse(res, 'Đã thêm bài viết vào sản phẩm', { productId, postId });
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi thêm bài viết vào sản phẩm', 500, error.message);
+    }
+};
+
+// Xóa bài viết khỏi sản phẩm
+exports.removePostFromProduct = async (req, res) => {
+    try {
+        const { productId, postId } = req.params;
+        const actorId = req.actor._id;
+
+        // Kiểm tra sản phẩm tồn tại và thuộc quyền sở hữu
+        const product = await Product.findOne({
+            _id: productId,
+            seller: actorId
+        });
+
+        if (!product) {
+            return errorResponse(res, 'Không tìm thấy sản phẩm hoặc không có quyền', 404);
+        }
+
+        // Kiểm tra bài viết có trong sản phẩm không
+        if (!product.posts.includes(postId)) {
+            return errorResponse(res, 'Bài viết không thuộc sản phẩm này', 400);
+        }
+
+        // Xóa bài viết khỏi sản phẩm
+        product.posts = product.posts.filter(id => id.toString() !== postId);
+        await product.save();
+
+        // Cập nhật productIds trong Post
+        const post = await Post.findById(postId);
+        if (post && post.productIds.includes(productId)) {
+            post.productIds = post.productIds.filter(id => id.toString() !== productId);
+            await post.save();
+        }
+
+        return successResponse(res, 'Đã xóa bài viết khỏi sản phẩm', { productId, postId });
+    } catch (error) {
+        return errorResponse(res, 'Lỗi khi xóa bài viết khỏi sản phẩm', 500, error.message);
     }
 };

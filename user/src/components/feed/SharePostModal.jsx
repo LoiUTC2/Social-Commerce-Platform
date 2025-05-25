@@ -1,83 +1,74 @@
-import React from 'react';
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-} from '../ui/dialog';
-import { Textarea } from '../ui/textarea';
-import { Button } from '../ui/button';
-import { Lock, Globe, Users, Loader2, Smile } from 'lucide-react';
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '../ui/select';
-import { useState, useEffect, useRef } from 'react';
+"use client"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../components/ui/dialog"
+import { Textarea } from "../../components/ui/textarea"
+import { Button } from "../../components/ui/button"
+import { Lock, Globe, Users, Loader2, Smile } from "lucide-react"
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../../components/ui/select"
+import { useState, useEffect, useRef } from "react"
 
-import { useAuth } from '../../contexts/AuthContext';
-import { sharePost } from '../../services/postInteractionService';
-import { toast } from 'sonner';
-import ramos from '../../assets/ramos.webp'
-import FeedItem from './FeedItem';
-import EmojiPicker from "emoji-picker-react";
+import { useAuth } from "../../contexts/AuthContext"
+import { sharePost } from "../../services/postInteractionService"
+import { toast } from "sonner"
+import FeedItem from "./FeedItem"
+import EmojiPicker from "emoji-picker-react"
 
 const SharePostModal = ({ open, onOpenChange, post, postIdToShare, onShareCompleted }) => {
-    const { user, setShowLoginModal } = useAuth();
+    const { user, setShowLoginModal } = useAuth()
 
-    const [privacy, setPrivacy] = useState('public');
-    const [content, setContent] = useState('');
-    const [isSharing, setIsSharing] = useState(false);
-    const [showEmoji, setShowEmoji] = useState(false);
-    const emojiRef = useRef(null);
+    const [privacy, setPrivacy] = useState("public")
+    const [content, setContent] = useState("")
+    const [isSharing, setIsSharing] = useState(false)
+    const [showEmoji, setShowEmoji] = useState(false)
+    const emojiRef = useRef(null)
 
     const privacyIcons = {
         public: <Globe size={14} />,
         friends: <Users size={14} />,
         private: <Lock size={14} />,
-    };
+    }
 
     const handleEmojiClick = (emojiData) => {
-        setContent((prev) => prev + emojiData.emoji);
-    };
+        setContent((prev) => prev + emojiData.emoji)
+    }
 
-    // Tự động tắt khi cuộn chuột hoặc click ra ngoài picker
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (emojiRef.current && !emojiRef.current.contains(event.target)) {
-                setShowEmoji(false);
+                setShowEmoji(false)
             }
-        };
+        }
 
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
+        document.addEventListener("mousedown", handleClickOutside)
+        return () => document.removeEventListener("mousedown", handleClickOutside)
+    }, [])
 
     const handleShare = async () => {
-        if (isSharing) return;
+        if (isSharing) return
 
         try {
-            setIsSharing(true);
-            //Call API
+            setIsSharing(true)
             const res = await sharePost(postIdToShare, content, privacy)
 
             toast.success("Chia sẻ thành công", {
                 description: "Bài viết đã được chia sẻ lên tường của bạn",
-            });
+            })
 
-            onOpenChange(false);
-            setContent('');
+            onOpenChange(false)
+            setContent("")
 
-            // Gọi callback nếu có để cập nhật UI
-            if (typeof onShareCompleted === 'function') {
-                onShareCompleted();
+            if (typeof onShareCompleted === "function") {
+                onShareCompleted()
             }
-            console.log('Chia sẻ thành công:', res);
+            console.log("Chia sẻ thành công:", res)
         } catch (error) {
             toast.error("Lỗi chia sẻ", {
                 description: "Không thể chia sẻ bài viết. Vui lòng thử lại sau.",
-            });
-            console.error("Lỗi chia sẻ:", error);
+            })
+            console.error("Lỗi chia sẻ:", error)
         } finally {
-            setIsSharing(false);
+            setIsSharing(false)
         }
-    };
+    }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -86,15 +77,13 @@ const SharePostModal = ({ open, onOpenChange, post, postIdToShare, onShareComple
                 overlayClassName="bg-black/10 backdrop-blur-sm"
             >
                 <DialogHeader className="border-b pb-2 mb-3">
-                    <DialogTitle className="text-center text-lg font-semibold">
-                        Chia sẻ bài viết
-                    </DialogTitle>
+                    <DialogTitle className="text-center text-lg font-semibold">Chia sẻ bài viết</DialogTitle>
                 </DialogHeader>
 
                 {/* Avatar người dùng */}
                 <div className="flex items-center gap-3 mb-1">
                     <img
-                        src={user?.avatar}
+                        src={user?.avatar || "/placeholder.svg?height=40&width=40"}
                         alt="avatar"
                         className="w-10 h-10 rounded-full object-cover"
                     />
@@ -142,29 +131,10 @@ const SharePostModal = ({ open, onOpenChange, post, postIdToShare, onShareComple
                     </div>
 
                     {/* Hiển thị bài viết gốc */}
-                    {/* <div className="bg-gray-100 border rounded-lg p-3 mt-1 text-sm text-gray-700"> */}
-                    {/* <div className="font-semibold mb-1">{post.userId?.fullName || 'Người dùng'}</div>
-                    <p className="text-sm">{post.content?.slice(0, 150)}{post.content?.length > 150 ? '...' : ''}</p> */}
-
-                    {/* Hiển thị hình ảnh đầu tiên nếu có */}
-                    {/* {post.images && post.images.length > 0 && (
-                        <div className="mt-2">
-                            <img
-                                src={post.images[0]}
-                                alt="Post preview"
-                                className="h-32 rounded object-cover"
-                            />
-                            {post.images.length > 1 && (
-                                <div className="text-xs text-gray-500 mt-1">
-                                    +{post.images.length - 1} hình ảnh khác
-                                </div>
-                            )}
-                        </div>
-                    )} */}
-                    <FeedItem post={post} />
-                    {/* </div> */}
+                    <div className="border rounded-lg overflow-hidden">
+                        <FeedItem post={post} />
+                    </div>
                 </div>
-
 
                 {/* Nút chia sẻ */}
                 <div className="border-t p-4 sticky bottom-0 bg-white z-10">
@@ -175,13 +145,13 @@ const SharePostModal = ({ open, onOpenChange, post, postIdToShare, onShareComple
                                 Đang chia sẻ...
                             </>
                         ) : (
-                            'Chia sẻ ngay'
+                            "Chia sẻ ngay"
                         )}
                     </Button>
                 </div>
             </DialogContent>
         </Dialog>
-    );
-};
+    )
+}
 
-export default SharePostModal;
+export default SharePostModal

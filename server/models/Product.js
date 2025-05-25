@@ -29,6 +29,8 @@ const productSchema = new mongoose.Schema({
     ratings: { avg: { type: Number, default: 0 }, count: { type: Number, default: 0 } },
     soldCount: { type: Number, default: 0 }, //số lượng đã bán
     isActive: { type: Boolean, default: true }, // đang bán (true) và ngừng bán (false)
+    allowPosts: { type: Boolean, default: true }, // Cho phép đăng bài viết kèm sản phẩm
+    posts: [{type: mongoose.Schema.Types.ObjectId, ref: 'Post'}], // Danh sách các bài viết liên quan đến sản phẩm (nếu cần)
     tags: [String],
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }

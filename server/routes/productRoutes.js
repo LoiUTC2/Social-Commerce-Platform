@@ -15,6 +15,12 @@ router.delete('/:productId', verifyToken, setActor,requireRole(['seller', 'admin
 // Chuyển đổi trạng thái sản phẩm (đang bán hoặc ngừng bán)
 router.patch('/toggleStatus/:productId', verifyToken, setActor,requireRole(['seller', 'admin']), checkProductOwnership, productController.toggleProductActiveStatus);
 
+// bật/tắt allowPosts
+router.patch('/:productId/toggleAllowPosts', verifyToken, setActor ,requireRole(['seller', 'admin']), checkProductOwnership, productController.toggleAllowPosts);
+
+//Lấy sản phẩm cho phép đăng bài viết
+router.get( '/forPosts', verifyToken, setActor, productController.getFeaturedProductsForPosts );
+
 // Lấy danh sách sản phẩm nổi bật (dựa vào soldCount và rating)
 router.get('/featured', productController.getFeaturedProducts);
 
@@ -36,3 +42,12 @@ router.get('/getDetailForSeller/:slug', verifyToken, setActor, requireRole(['sel
 // Tìm kiếm sản phẩm bằng slug
 router.get('/slug/:slug', verifyToken, setActor ,productController.getProductBySlug);
 module.exports = router;
+
+// Lấy danh sách bài viết của sản phẩm
+router.get('/:productId/posts', verifyToken, setActor, productController.getProductPosts);
+
+// Thêm bài viết vào sản phẩm
+router.post('/:productId/posts', verifyToken, setActor, requireRole(['seller', 'admin']), checkProductOwnership, productController.addPostToProduct);
+
+// Xóa bài viết khỏi sản phẩm
+router.delete('/:productId/posts/:postId', verifyToken, setActor, requireRole(['seller', 'admin']), checkProductOwnership, productController.removePostFromProduct);

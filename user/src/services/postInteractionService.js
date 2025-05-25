@@ -18,6 +18,14 @@ export const likeComment = async (commentId) => {
   return res.data;
 };
 
+// Lấy danh sách like của bình luận
+export const getCommentLikes = async (commentId, page = 1, limit = 10) => {
+  const res = await api.get(`/postInteraction/comment/${commentId}/likes`, {
+    params: { page, limit }
+  });
+  return res.data;
+};
+
 // Bình luận hoặc trả lời bình luận
 export const commentOrReply = async (postId, text, parentId = null) => {
   const res = await api.post(`/postInteraction/${postId}/comment`, {
@@ -28,8 +36,8 @@ export const commentOrReply = async (postId, text, parentId = null) => {
 };
 
 // Lấy danh sách bình luận của bài viết
-export const getCommentsByPost = async (postId, sortBy = 'top') => {
-  const res = await api.get(`/postInteraction/${postId}/comments?sortBy=${sortBy}&page=1&limit=5`);
+export const getCommentsByPost = async (postId, sortBy = 'top', page = 1, limit = 5) => {
+  const res = await api.get(`/postInteraction/${postId}/comments?sortBy=${sortBy}&page=${page}&limit=${limit}`);
   return res.data;
 };
 
@@ -48,44 +56,3 @@ export const getPostShares = async (postId) => {
   return res.data;
 };
 
-
-////////////mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmTESTmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm
-export const sharePost1 = async (postId, content) => {
-  try {
-    const response = await fetch(`/postInteraction/${postId}/share`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ content }), // Gửi nội dung người dùng nhập khi chia sẻ
-      credentials: 'include', // Đảm bảo gửi cookie xác thực
-    });
-
-    if (!response.ok) {
-      throw new Error('Lỗi khi chia sẻ bài viết');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Lỗi chia sẻ bài viết:', error);
-    throw error;
-  }
-};
-
-export const getPostShares1 = async (postId) => {
-  try {
-    const response = await fetch(`/postInteraction/${postId}/shares`, {
-      method: 'GET',
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      throw new Error('Lỗi khi lấy danh sách chia sẻ');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Lỗi lấy danh sách chia sẻ:', error);
-    throw error;
-  }
-};

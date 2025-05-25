@@ -113,7 +113,7 @@ const StoreInfo = () => {
         // Lấy dữ liệu danh mục
         const categoryResponse = await getCategoryTree()
         if (categoryResponse.success) {
-          setCategories(categoryResponse.data)
+          setCategories(categoryResponse.data.tree)
         }
       } catch (err) {
         setError(err.response?.data?.message || "Không thể tải thông tin. Vui lòng thử lại sau.")

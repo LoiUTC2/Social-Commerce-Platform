@@ -1,345 +1,566 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { MoreHorizontal, Heart, MessageCircle, Share, Send, Plus, Lock, Globe, Users } from 'lucide-react';
+import { useState, useEffect } from "react"
+import { Card, CardContent } from "../../components/ui/card"
+import { Button } from "../../components/ui/button"
+import { Badge } from "../../components/ui/badge"
+import { MoreHorizontal, Heart, MessageCircle, Share, Send, Lock, Globe, Users, ShoppingCart } from "lucide-react"
 
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../../components/ui/tooltip';
-import { useAuth } from '../../contexts/AuthContext';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu"
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../components/ui/tooltip"
+import { useAuth } from "../../contexts/AuthContext"
 
-import MediaItem from './MediaItem';
-import LikesListModal from './LikesListModal';
-import CommentModal from './CommentModal';
-import SharePostModal from './SharePostModal';
+import MediaGallery from "./MediaGallery"
+import ProductCard from "./ProductCard"
+import LikesListModal from "./LikesListModal"
+import CommentModal from "./CommentModal"
+import SharePostModal from "./SharePostModal"
+import SharesListModal from "./SharesListModal"
 
-import { useNavigate } from 'react-router-dom';
-import { likePost, getPostLikes, sharePost, getPostShares } from '../../services/postInteractionService';
+import { useNavigate } from "react-router-dom"
+import { likePost, getPostLikes, getPostShares } from "../../services/postInteractionService"
 
-import { toast } from 'sonner';
-import { formatDistanceToNow, format } from 'date-fns';
-import { vi } from 'date-fns/locale';
-
-// [Grok] Giả định component SharesListModal để hiển thị danh sách chia sẻ
-import SharesListModal from './SharesListModal';
+import { toast } from "sonner"
+import { formatDistanceToNow, format } from "date-fns"
+import { vi } from "date-fns/locale"
 
 export default function FeedItem({ post }) {
-  const { _id, author, content, images, videos, createdAt, likesCount = 0, commentsCount = 0, sharesCount = 0, sharedPost, privacy } = post;
-  const { user, setShowLoginModal } = useAuth();
+  const {
+    _id,
+    author,
+    content,
+    images = [],
+    videos = [],
+    productIds = [],
+    createdAt,
+    likesCount = 0,
+    commentsCount = 0,
+    sharesCount = 0,
+    sharedPost,
+    privacy,
+  } = post
 
-  const nameAuthor = author?.type === 'User' ? author?._id?.fullName : author?._id?.name;
-  const avatarAuthor = author?._id?.avatar;
+  const { user, setShowLoginModal } = useAuth()
+  const navigate = useNavigate()
 
-  const [likes, setLikes] = useState(likesCount); // số lượng like
-  const [liked, setLiked] = useState(false); // tuỳ chọn: theo dõi trạng thái đã like hay chưa
-  const [likesList, setLikesList] = useState([]); // List người đã like
+  const nameAuthor = author?.type === "User" ? author?._id?.fullName : author?._id?.name
+  const avatarAuthor = author?._id?.avatar
 
-  const [comments, setComments] = useState(commentsCount);
-  const [shares, setShares] = useState(sharesCount);
-  const [sharesList, setSharesList] = useState([]); // [Grok] Thêm state để lưu danh sách chia sẻ
+  const [likes, setLikes] = useState(likesCount)
+  const [liked, setLiked] = useState(false)
+  const [likesList, setLikesList] = useState([])
+  const [comments, setComments] = useState(commentsCount)
+  const [shares, setShares] = useState(sharesCount)
+  const [sharesList, setSharesList] = useState([])
 
-  const [openLikesModal, setOpenLikesModal] = useState(false);
-  const [openSharesModal, setOpenSharesModal] = useState(false); // [Grok] Thêm state cho modal danh sách chia sẻ
-  const [openComment, setOpenComment] = useState(false);
-  const [openShare, setOpenShare] = useState(false);
+  const [openLikesModal, setOpenLikesModal] = useState(false)
+  const [openSharesModal, setOpenSharesModal] = useState(false)
+  const [openComment, setOpenComment] = useState(false)
+  const [openShare, setOpenShare] = useState(false)
 
-  const navigate = useNavigate();
+  const isSharedPost = post.type === "share" && sharedPost
+  const postToShare = isSharedPost ? sharedPost : post
+  const postIdToShare = postToShare._id
+
+  // Xử lý media từ bài viết và sản phẩm (không bao gồm sharedPost)
+  const getDisplayMedia = () => {
+    let allMedia = []
+
+    // Chỉ thêm media từ bài viết hiện tại (không phải sharedPost)
+    if (!isSharedPost) {
+      const postVideos = videos.map((url) => ({ url, type: "video", source: "post" }))
+      const postImages = images.map((url) => ({ url, type: "image", source: "post" }))
+
+      // Ưu tiên video trước
+      allMedia = [...postVideos, ...postImages]
+
+      // Thêm media từ sản phẩm nếu có
+      if (productIds && productIds.length > 0) {
+        productIds.forEach((product) => {
+          if (product.videos) {
+            const productVideos = product.videos.map((url) => ({
+              url,
+              type: "video",
+              source: "product",
+              productId: product._id,
+              productName: product.name,
+              productSlug: product.slug,
+            }))
+            allMedia = [...allMedia, ...productVideos]
+          }
+
+          if (product.images) {
+            const productImages = product.images.map((url) => ({
+              url,
+              type: "image",
+              source: "product",
+              productId: product._id,
+              productName: product.name,
+              productSlug: product.slug,
+            }))
+            allMedia = [...allMedia, ...productImages]
+          }
+        })
+      }
+    }
+
+    return allMedia
+  }
+
+  const displayMedia = getDisplayMedia()
+  const hasProducts = productIds && productIds.length > 0
 
   const renderPrivacyIcon = (privacy) => {
+    const iconProps = { className: "w-3 h-3" }
     switch (privacy) {
-      case 'public':
+      case "public":
         return (
-          <span title="Công khai" className="flex items-center gap-1 text-gray-500 text-xs cursor-pointer">
-            <Globe className="w-4 h-3" />
-          </span>
-        );
-      case 'friends':
+          <Tooltip>
+            <TooltipTrigger>
+              <Globe {...iconProps} />
+            </TooltipTrigger>
+            <TooltipContent>Công khai</TooltipContent>
+          </Tooltip>
+        )
+      case "friends":
         return (
-          <span title="Bạn bè" className="flex items-center gap-1 text-gray-500 text-xs cursor-pointer">
-            <Users className="w-4 h-3" />
-          </span>
-        );
-      case 'private':
+          <Tooltip>
+            <TooltipTrigger>
+              <Users {...iconProps} />
+            </TooltipTrigger>
+            <TooltipContent>Bạn bè</TooltipContent>
+          </Tooltip>
+        )
+      case "private":
         return (
-          <span title="Chỉ mình tôi" className="flex items-center gap-1 text-gray-500 text-xs cursor-pointer">
-            <Lock className="w-4 h-3" />
-          </span>
-        );
+          <Tooltip>
+            <TooltipTrigger>
+              <Lock {...iconProps} />
+            </TooltipTrigger>
+            <TooltipContent>Chỉ mình tôi</TooltipContent>
+          </Tooltip>
+        )
       default:
-        return null;
+        return null
     }
-  };
+  }
 
   useEffect(() => {
     const fetchLikes = async () => {
       try {
-                console.log("slug:", author?._id?.slug);
+        const res = await getPostLikes(_id)
+        const likesData = res.data || []
+        setLikesList(likesData)
+        setLikes(likesData.length)
 
-        const res = await getPostLikes(_id);
-        const likesData = res.data || [];
-        setLikesList(likesData);
-        setLikes(likesData.length);
-        // Kiểm tra xem user hiện tại đã like bài viết chưa
         if (user) {
-          const userLiked = likesData.some(likeItem => likeItem?._id === user?._id && likeItem?.type === (user?.role === 'seller' ? 'Shop' : 'User')); // [Grok] Kiểm tra cả _id và type
-          setLiked(userLiked);
+          const userLiked = likesData.some(
+            (likeItem) => likeItem?._id === user?._id && likeItem?.type === (user?.role === "seller" ? "Shop" : "User"),
+          )
+          setLiked(userLiked)
         }
       } catch (err) {
-        console.error('Lỗi lấy danh sách likes:', err);
+        console.error("Lỗi lấy danh sách likes:", err)
       }
-    };
-    fetchLikes();
-  }, [_id, user]);
+    }
+    fetchLikes()
+  }, [_id, user])
 
   const handleLike = async () => {
-    if (!user) return setShowLoginModal(true);
+    if (!user) return setShowLoginModal(true)
 
     try {
-      console.log("_id", _id)
-      const res = await likePost(_id); // gọi API 
-      const likesCountFromDB = res.data.likesCount; // [Grok] Lấy likesCount từ API
-      setLikes(likesCountFromDB);
-      if (res.message.includes('Đã thích')) {
-        setLiked(true);
-        // Thêm user hiện tại vào danh sách likes nếu chưa có
-        const userAlreadyLiked = likesList.some(like => like._id === user?._id);
+      const res = await likePost(_id)
+      const likesCountFromDB = res.data.likesCount
+      setLikes(likesCountFromDB)
+
+      if (res.message.includes("Đã thích")) {
+        setLiked(true)
+        const userAlreadyLiked = likesList.some((like) => like._id === user?._id)
         if (!userAlreadyLiked) {
-          setLikesList(prev => [...prev, {
-            _id: user?._id,
-            type: user?.role === 'seller' ? 'Shop' : 'User', // [Grok] Thêm type vào likesList
-            fullName: user?.fullName,
-            avatar: user?.avatar,
-            name: user?.role === 'seller' ? user?.shopName : undefined // [Grok] Thêm name nếu là Shop
-          }]);
+          setLikesList((prev) => [
+            ...prev,
+            {
+              _id: user?._id,
+              type: user?.role === "seller" ? "Shop" : "User",
+              fullName: user?.fullName,
+              avatar: user?.avatar,
+              name: user?.role === "seller" ? user?.shopName : undefined,
+            },
+          ])
         }
       } else {
-        setLiked(false);
-        setLikesList(prev => prev.filter(like => like?._id !== user?._id)); // Xóa user hiện tại khỏi danh sách likes
+        setLiked(false)
+        setLikesList((prev) => prev.filter((like) => like?._id !== user?._id))
       }
     } catch (err) {
-      console.error('Lỗi like bài viết:', err.message);
+      console.error("Lỗi like bài viết:", err.message)
     }
-  };
+  }
 
   const handleGetLikeList = async () => {
-    if (!user) return setShowLoginModal(true);
-
+    if (!user) return setShowLoginModal(true)
     try {
-      const res = await getPostLikes(_id); // ✅ Gọi API
-      const likesData = res.data || [];
-      setLikesList(likesData); // Lưu danh sách
-      setLikes(likesData.length);
-      setOpenLikesModal(true);
-      console.log("like", res.data)
+      const res = await getPostLikes(_id)
+      const likesData = res.data || []
+      setLikesList(likesData)
+      setLikes(likesData.length)
+      setOpenLikesModal(true)
     } catch (err) {
-      console.error('Lỗi khi lấy danh sách like:', err);
+      console.error("Lỗi khi lấy danh sách like:", err)
     }
-  };
-
-  const handleOpenLikesModal = () => {
-    if (likes > 0) {
-      handleGetLikeList();
-    }
-  };
+  }
 
   const handleComment = () => {
-    if (!user) return setShowLoginModal(true);
-    setOpenComment(true);
-  };
+    if (!user) return setShowLoginModal(true)
+    setOpenComment(true)
+  }
 
   const handleShare = () => {
-    if (!user) return setShowLoginModal(true);
-    setOpenShare(true);
-  };
+    if (!user) return setShowLoginModal(true)
+    setOpenShare(true)
+  }
 
   const handleShareCompleted = () => {
-    setShares(prev => prev + 1);
+    setShares((prev) => prev + 1)
     toast.success("Chia sẻ thành công", {
       description: "Bài viết đã được chia sẻ lên tường của bạn",
-    });
-  };
+    })
+  }
 
   const handleGetShareList = async () => {
-    if (!user) return setShowLoginModal(true);
-
+    if (!user) return setShowLoginModal(true)
     try {
-      const res = await getPostShares(_id); // ✅ Gọi API
-      const sharesData = res.data.shares || []; // [Grok] Lấy shares từ API
-      setSharesList(sharesData); // [Grok] Lưu danh sách chia sẻ
-      setShares(sharesData.length);
-      setOpenSharesModal(true); // [Grok] Mở modal danh sách chia sẻ
-      console.log("shares", res.data)
+      const res = await getPostShares(_id)
+      const sharesData = res.data.shares || []
+      setSharesList(sharesData)
+      setShares(sharesData.length)
+      setOpenSharesModal(true)
     } catch (err) {
-      console.error('Lỗi khi lấy danh sách chia sẻ:', err);
+      console.error("Lỗi khi lấy danh sách chia sẻ:", err)
     }
-  };
-
-  // Kiểm tra có phải là bài viết được chia sẻ không
-  const isSharedPost = post.type === 'share' && sharedPost;
-  // Xác định bài viết cần chia sẻ (bài gốc nếu là bài share, nếu không thì là bài hiện tại)
-  const postToShare = isSharedPost ? sharedPost : post;
-  const postIdToShare = postToShare._id;
+  }
 
   const handleMessage = () => {
-    if (!user) return setShowLoginModal(true);
-    console.log('📨 Gửi tin nhắn cho Shop ABC');
-    // navigate(`/messages/${userId?._id}`); // [Grok] Cần cập nhật userId từ author._id._id
-    navigate(`/messages/${author?._id?._id}`); // [Grok] Sử dụng author._id._id để điều hướng đúng
-  };
+    if (!user) return setShowLoginModal(true)
+    navigate(`/messages/${author?._id?._id}`)
+  }
 
   return (
-    <Card className="mb-4">
-      <CardContent className="p-4 space-y-3">
+    <Card className="mb-6 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
+      <CardContent className="p-0">
         {/* Header */}
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <img src={avatarAuthor || '/avatar-default.jpg'} className="rounded-full w-10 h-10" onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)} alt="Profile" />
-            <div>
-              <p className="font-semibold cursor-pointer hover:underline" onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}>{nameAuthor || 'Người dùng'}</p>
-              <div className="flex items-center gap-1 text-xs text-gray-500">
-                <span className='cursor-pointer' title={format(new Date(createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", { locale: vi })}>
-                  {formatDistanceToNow(new Date(createdAt), { addSuffix: true, locale: vi }).replace(/^khoảng /, '')}
-                </span>
-                {renderPrivacyIcon(post?.privacy)}
+        <div className="p-4 pb-3">
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <img
+                  src={avatarAuthor || "/placeholder.svg?height=40&width=40"}
+                  className="rounded-full w-10 h-10 object-cover cursor-pointer ring-2 ring-gray-100"
+                  onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}
+                  alt="Profile"
+                />
+                {author?.type === "Shop" && (
+                  <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full p-1">
+                    <ShoppingCart className="w-3 h-3 text-white" />
+                  </div>
+                )}
               </div>
-            </div>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem>Quan tâm</DropdownMenuItem>
-              <DropdownMenuItem>Không quan tâm</DropdownMenuItem>
-              <DropdownMenuItem>Ẩn bài viết</DropdownMenuItem>
-              <DropdownMenuItem>Lưu bài viết</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Nội dung bài viết */}
-        <p className="whitespace-pre-line">{content}</p>
-
-        {/* Nếu là bài viết được chia sẻ, hiển thị bài viết gốc */}
-        {isSharedPost && sharedPost && (
-          <div className="border rounded-lg p-3 bg-gray-50">
-            <div className="flex items-center gap-2 mb-2">
-              <img
-                src={sharedPost.author?._id?.avatar || '/avatar-default.jpg'}
-                className="w-8 h-8 rounded-full"
-                onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
-                alt="Original author"
-              />
-              <div>
-                <p className="font-medium text-sm cursor-pointer hover:underline" onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}>{sharedPost.author?._id?.fullName || sharedPost.author?._id?.name || 'Người dùng'}</p>
-                <div className="flex items-center gap-1 text-xs text-gray-500">
-                  <span className='cursor-pointer' title={format(new Date(createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", { locale: vi })}>
-                    {formatDistanceToNow(new Date(sharedPost?.createdAt), { addSuffix: true, locale: vi }).replace(/^khoảng /, '')}
-                  </span>
-                  {renderPrivacyIcon(sharedPost?.privacy)}
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p
+                    className="font-semibold text-gray-900 cursor-pointer hover:underline"
+                    onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}
+                  >
+                    {nameAuthor || "Người dùng"}
+                  </p>
+                  {author?.type === "Shop" && (
+                    <Badge variant="secondary" className="text-xs">
+                      Shop
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-pointer hover:text-gray-700">
+                          {formatDistanceToNow(new Date(createdAt), { addSuffix: true, locale: vi }).replace(
+                            /^khoảng /,
+                            "",
+                          )}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {format(new Date(createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", { locale: vi })}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <span className="text-gray-300">•</span>
+                  <TooltipProvider>{renderPrivacyIcon(post?.privacy)}</TooltipProvider>
                 </div>
               </div>
             </div>
-            <p className="text-sm whitespace-pre-line">{sharedPost.content}</p>
 
-            {/* Media của bài viết gốc */}
-            {sharedPost.images?.length > 0 || sharedPost.videos?.length > 0 ? (
-              <div className="mt-2">
-                <MediaItem
-                  images={sharedPost.images}
-                  videos={sharedPost.videos}
-                  postId={sharedPost._id}
-                  compact={true} // Hiển thị nhỏ gọn hơn
-                />
-              </div>
-            ) : null}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem>Quan tâm</DropdownMenuItem>
+                <DropdownMenuItem>Không quan tâm</DropdownMenuItem>
+                <DropdownMenuItem>Ẩn bài viết</DropdownMenuItem>
+                <DropdownMenuItem>Lưu bài viết</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {/* Nội dung bài viết */}
+        {content && (
+          <div className="px-4 pb-3" onClick={() => navigate(`/feed/post/${post._id}`)}>
+            <p className="text-gray-900 whitespace-pre-line leading-relaxed cursor-pointer">{content}</p>
           </div>
         )}
 
-        {/* Media container */}
-        {(images?.length > 0 || videos?.length > 0) && (
-          <MediaItem images={images} videos={videos} postId={_id} />
-        )}
-
-        {/* Thanh tương tác & gửi tin nhắn */}
-        <div className="flex justify-between items-center text-sm text-gray-600 px-2 h-2">
-          {/* Số lượt thích ❤ 👍 😆 */}
-          <div className="pl-1">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="ml-6 hover:text-black-500 cursor-pointer hover:underline" onClick={handleOpenLikesModal}>
-                    {likes > 0 ? `${likes.toLocaleString()} lượt thích` : 'Chưa có lượt thích'}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="bg-white shadow-lg rounded-lg p-2 text-sm text-black">
-                  {likesList.length === 0 ? (
-                    <div>Chưa có ai thích</div>
-                  ) : (
-                    <div className="max-w-[200px]">
-                      {likesList.slice(0, 5).map((user) => (
-                        <div key={user?._id} className="truncate">
-                          {user?.type === 'User' ? user?.fullName : user?.name}
-                        </div>
-                      ))}
-                      {likesList.length > 5 && (
-                        <div className="text-gray-400 text-xs mt-1">
-                          ... và {likesList.length - 5} người khác
-                        </div>
-                      )}
+        {/* Bài viết được chia sẻ */}
+        {isSharedPost && sharedPost && (
+          <div className="mx-4 mb-3 border rounded-xl overflow-hidden bg-gray-50/50">
+            {/* Header của bài viết gốc */}
+            <div className="p-4 pb-3 bg-white">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <img
+                    src={sharedPost.author?._id?.avatar || "/placeholder.svg?height=32&width=32"}
+                    className="w-8 h-8 rounded-full object-cover cursor-pointer ring-2 ring-gray-100"
+                    onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
+                    alt="Original author"
+                  />
+                  {sharedPost.author?.type === "Shop" && (
+                    <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full p-0.5">
+                      <ShoppingCart className="w-2 h-2 text-white" />
                     </div>
                   )}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p
+                      className="font-medium text-sm cursor-pointer hover:underline"
+                      onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
+                    >
+                      {sharedPost.author?._id?.fullName || sharedPost.author?._id?.name || "Người dùng"}
+                    </p>
+                    {sharedPost.author?.type === "Shop" && (
+                      <Badge variant="secondary" className="text-xs">
+                        Shop
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-pointer hover:text-gray-700">
+                            {formatDistanceToNow(new Date(sharedPost?.createdAt), {
+                              addSuffix: true,
+                              locale: vi,
+                            }).replace(/^khoảng /, "")}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {format(new Date(sharedPost?.createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", {
+                            locale: vi,
+                          })}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <span className="text-gray-300">•</span>
+                    <TooltipProvider>{renderPrivacyIcon(sharedPost?.privacy)}</TooltipProvider>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-          {/* Số bình luận, chia sẻ, nhắn tin */}
-          <div className="flex items-center gap-4">
-            <span className='cursor-pointer hover:underline' onClick={handleComment}>{comments} bình luận</span>
-            <span className='cursor-pointer hover:underline' onClick={handleGetShareList}>{shares} lượt chia sẻ</span> {/* [Grok] Sửa để mở modal danh sách chia sẻ */}
+            {/* Nội dung bài viết gốc */}
+            {sharedPost.content && (
+              <div className="px-4 pb-3 bg-white point-cursor" onClick={() => navigate(`/feed/post/${sharedPost._id}`)}>
+                <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed cursor-pointer">{sharedPost.content}</p>
+              </div>
+            )}
 
-            {/* Gửi tin nhắn */}
-            {user && user._id !== author?._id?._id && ( // [Grok] So sánh với author._id._id
-              <Button
-                onClick={handleMessage}
-                size="sm"
-                variant="ghost"
-                className="text-blue-600 flex items-center gap-1 h-8 px-2"
-              >
-                <Send size={16} /> Gửi tin nhắn
-              </Button>
+            {/* Media Gallery của bài viết gốc */}
+            {(sharedPost.images?.length > 0 || sharedPost.videos?.length > 0 || sharedPost.productIds?.length > 0) && (
+              <div className="bg-white">
+                <MediaGallery
+                  media={[
+                    ...(sharedPost.videos?.map((url) => ({ url, type: "video", source: "post" })) || []),
+                    ...(sharedPost.images?.map((url) => ({ url, type: "image", source: "post" })) || []),
+                    // Thêm media từ sản phẩm của bài viết gốc
+                    ...(sharedPost.productIds?.flatMap((product) => [
+                      ...(product.videos?.map((url) => ({
+                        url,
+                        type: "video",
+                        source: "product",
+                        productId: product._id,
+                        productName: product.name,
+                        productSlug: product.slug,
+                      })) || []),
+                      ...(product.images?.map((url) => ({
+                        url,
+                        type: "image",
+                        source: "product",
+                        productId: product._id,
+                        productName: product.name,
+                        productSlug: product.slug,
+                      })) || []),
+                    ]) || []),
+                  ]}
+                  postId={sharedPost._id}
+                  compact={true}
+                  hasProducts={sharedPost.productIds?.length > 0}
+                />
+              </div>
+            )}
+
+            {/* Product Cards của bài viết gốc */}
+            {sharedPost.productIds && sharedPost.productIds.length > 0 && (
+              <div className="px-4 pb-3 bg-white">
+                <div className="space-y-3">
+                  {sharedPost.productIds.map((product) => (
+                    <ProductCard key={product._id} product={product} />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
+        )}
+
+        {/* Media Gallery */}
+        {displayMedia.length > 0 && (
+          <div className="relative">
+            <MediaGallery media={displayMedia} postId={_id} hasProducts={hasProducts} />
+          </div>
+        )}
+
+        {/* Product Cards */}
+        {hasProducts && (
+          <div className="px-4 pb-3">
+            <div className="space-y-3">
+              {productIds.map((product) => (
+                <ProductCard key={product._id} product={product} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Interaction Stats */}
+        <div className="px-4 py-2 border-t border-gray-100">
+          <div className="flex justify-between items-center text-sm text-gray-600">
+            <div className="flex items-center gap-4">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="flex items-center gap-1 hover:text-red-500 transition-colors"
+                      onClick={() => likes > 0 && handleGetLikeList()}
+                    >
+                      <div className="flex -space-x-1">
+                        <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                          <Heart className="w-3 h-3 text-white fill-white" />
+                        </div>
+                      </div>
+                      <span>{likes > 0 ? `${likes.toLocaleString()}` : "Chưa có lượt thích"}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {likesList.length === 0 ? (
+                      <div>Chưa có ai thích</div>
+                    ) : (
+                      <div className="max-w-[200px]">
+                        {likesList.slice(0, 5).map((user) => (
+                          <div key={user?._id} className="truncate">
+                            {user?.type === "User" ? user?.fullName : user?.name}
+                          </div>
+                        ))}
+                        {likesList.length > 5 && (
+                          <div className="text-gray-400 text-xs mt-1">... và {likesList.length - 5} người khác</div>
+                        )}
+                      </div>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+
+            <div className="flex items-center gap-4 text-sm">
+              <button className="hover:underline hover:text-blue-600 transition-colors" onClick={handleComment}>
+                {comments || 0} bình luận
+              </button>
+              <button className="hover:underline hover:text-green-600 transition-colors" onClick={handleGetShareList}>
+                {shares || 0} chia sẻ
+              </button>
+
+              {user && user._id !== author?._id?._id && (
+                <Button
+                  onClick={handleMessage}
+                  size="sm"
+                  variant="ghost"
+                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-7 px-2"
+                >
+                  <Send className="w-4 h-4 mr-1" />
+                  Nhắn tin
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Các nút tương tác hành động */}
-        <div className="flex justify-around text-gray-700 mt-2 pb-1 border-t pt-2 text-sm">
-          <button onClick={handleLike} className={`flex items-center gap-1 hover:text-red-500 ${liked ? 'text-red-500' : ''}`}>
-            <Heart size={16} className={liked ? 'fill-red-500' : ''} /> Thích
-          </button>
+        {/* Action Buttons */}
+        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/30">
+          <div className="grid grid-cols-3 gap-1">
+            <Button
+              onClick={handleLike}
+              variant="ghost"
+              className={`flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
+                liked ? "text-red-500 bg-red-50 hover:bg-red-100" : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <Heart className={`w-5 h-5 ${liked ? "fill-red-500" : ""}`} />
+              <span className="font-medium">Thích</span>
+            </Button>
 
-          <button onClick={handleComment} className="flex items-center gap-1 hover:text-blue-500">
-            <MessageCircle size={16} /> Bình luận
-          </button>
-          <button onClick={handleShare} className="flex items-center gap-1 hover:text-green-500">
-            <Share size={16} /> Chia sẻ
-          </button>
+            <Button
+              onClick={handleComment}
+              variant="ghost"
+              className="flex items-center justify-center gap-2 py-2 rounded-lg text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all"
+            >
+              <MessageCircle className="w-5 h-5" />
+              <span className="font-medium">Bình luận</span>
+            </Button>
+
+            <Button
+              onClick={handleShare}
+              variant="ghost"
+              className="flex items-center justify-center gap-2 py-2 rounded-lg text-gray-700 hover:bg-green-50 hover:text-green-600 transition-all"
+            >
+              <Share className="w-5 h-5" />
+              <span className="font-medium">Chia sẻ</span>
+            </Button>
+          </div>
         </div>
-
       </CardContent>
 
+      {/* Modals */}
       <LikesListModal open={openLikesModal} onOpenChange={setOpenLikesModal} likes={likesList} />
       <CommentModal open={openComment} onClose={setOpenComment} postId={_id} />
       <SharePostModal
         open={openShare}
         onOpenChange={setOpenShare}
-        post={postToShare} // Truyền bài viết gốc nếu là bài share
-        postIdToShare={postIdToShare} // Truyền ID của bài viết cần chia sẻ
+        post={postToShare}
+        postIdToShare={postIdToShare}
         onShareCompleted={handleShareCompleted}
       />
-      <SharesListModal open={openSharesModal} onOpenChange={setOpenSharesModal} shares={sharesList} /> {/* [Grok] Thêm modal danh sách chia sẻ */}
+      <SharesListModal open={openSharesModal} onOpenChange={setOpenSharesModal} shares={sharesList} />
     </Card>
-  );
+  )
 }

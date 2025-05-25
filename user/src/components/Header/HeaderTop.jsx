@@ -6,7 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ShopApprovalPendingModal } from '../../components/common/ShopApprovalPendingModal';
 const HeaderTop = () => {
-  const { sellerSubscribed, sellerStatusPending, isSeller, switchRole } = useAuth();
+  const { user, isAuthenticated, sellerSubscribed, sellerStatusPending, isSeller, switchRole } = useAuth();
   const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -25,8 +25,14 @@ const HeaderTop = () => {
         return;
       }
 
-      // Trường hợp 3: Chưa đăng ký seller
-      if (!sellerSubscribed) {
+      // Trường hợp 3: Đăng nhập rồi mà chưa đăng ký seller
+      if (isAuthenticated && !sellerSubscribed) {
+        navigate('/auth/registerShop');
+        return;
+      }
+
+      // Trường hợp 4: Chưa đăng nhập/đăng kí
+      if (!isAuthenticated) {
         navigate('/auth?type=register');
         return;
       }

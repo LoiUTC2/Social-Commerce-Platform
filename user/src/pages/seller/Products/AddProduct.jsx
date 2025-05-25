@@ -107,8 +107,8 @@ export default function AddProduct() {
         setIsLoadingCategories(true);
         try {
             const response = await getCategoryTree();
-            setCategories(response.data || []);
-            console.log('Categories fetched:', response.data);
+            setCategories(response.data.tree || []);
+            console.log('Categories fetched:', response.data.tree);
         } catch (error) {
             toast.error('Lỗi', { description: 'Không thể tải danh mục. Vui lòng thử lại.' });
             console.error('Lỗi khi lấy danh mục:', error);
