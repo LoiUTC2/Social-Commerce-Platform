@@ -63,7 +63,7 @@ export default function PostDetailPage() {
   const [openShare, setOpenShare] = useState(false)
 
   useEffect(() => {
-    window.scroll(0,0)
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     const fetchPost = async () => {
       try {
         setLoading(true)
