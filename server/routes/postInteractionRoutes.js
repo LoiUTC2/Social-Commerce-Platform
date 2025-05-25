@@ -11,6 +11,8 @@ router.post('/:postId/comment', verifyToken, setActor, postInteractionController
 
 router.post('/comment/:commentId/like', verifyToken, setActor, postInteractionController.likeComment); // like/bỏ like comment hoặc reply
 
+router.get('/comment/:commentId/likes', postInteractionController.getCommentLikes); // Lấy danh sách like của bình luận
+
 router.get('/:postId/comments', verifyToken, setActor, postInteractionController.getCommentsByPost); // lấy danh sách bình luận dạng cây
 
 router.post('/:id/share', verifyToken, setActor, postInteractionController.sharePost); // Chia sẻ bài viết

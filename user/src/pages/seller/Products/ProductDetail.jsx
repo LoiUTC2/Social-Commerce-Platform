@@ -20,8 +20,8 @@ export default function ProductDetail() {
     const fetchCategories = async () => {
         try {
             const response = await getCategoryTree();
-            console.log('Categories fetched:', response.data);
-            return response.data || [];
+            console.log('Categories fetched:', response.data.tree);
+            return response.data.tree || [];
         } catch (error) {
             toast.error('Lỗi', { description: 'Không thể tải danh mục. Vui lòng thử lại.' });
             console.error('Lỗi khi lấy danh mục:', error);

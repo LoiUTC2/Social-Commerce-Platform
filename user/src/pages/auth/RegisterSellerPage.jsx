@@ -154,7 +154,8 @@ const RegisterSellerPage = () => {
             // After a delay, navigate to shop registration
             setTimeout(() => {
                 navigate('/');
-            }, 8000);
+                window.location.reload();
+            }, 7000);
 
         } catch (error) {
             console.error('Registration error:', error);

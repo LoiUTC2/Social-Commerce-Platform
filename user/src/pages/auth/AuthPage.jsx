@@ -74,7 +74,8 @@ const AuthPage = () => {
       toast.success('Đăng ký thành công!');
       login(response.accessToken, response.user);
       setIsLoading(false);
-      setIsDialogOpen(true);
+      navigate("/auth?type=login");
+      // setIsDialogOpen(true);
     } catch (error) {
       setIsLoading(false);
       toast.error(error.message || 'Đăng ký thất bại, vui lòng thử lại.');
@@ -101,7 +102,7 @@ const AuthPage = () => {
   const handleSellerChoice = (wantsToBeSeller) => {
     setIsDialogOpen(false);
     if (wantsToBeSeller) {
-      navigate('/auth/registerSeller');
+      navigate('/auth/registerShop');
     } else {
       navigate('/auth');
     }

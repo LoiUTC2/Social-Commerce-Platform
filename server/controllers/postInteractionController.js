@@ -2,6 +2,8 @@ const Post = require('../models/Post');
 const UserInteraction = require('../models/UserInteraction');
 const { successResponse, errorResponse } = require('../utils/response');
 const Comment = require('../models/Comment');
+const mongoose = require('mongoose');
+
 
 exports.likePost = async (req, res) => {
     try {
@@ -63,7 +65,7 @@ exports.getPostLikes = async (req, res) => {
             targetType: 'post',
             targetId: postId,
             action: 'like'
-        }).populate('author._id', 'fullName avatar name'); // [Grok] Populate author._id để lấy thông tin User hoặc Shop
+        }).populate('author._id', 'fullName avatar name slug'); // [Grok] Populate author._id để lấy thông tin User hoặc Shop
 
         const authors = interactions.map(interaction => ({
             type: interaction.author.type,
@@ -78,8 +80,7 @@ exports.getPostLikes = async (req, res) => {
 // Bình luận bài viết hoặc reply
 exports.commentOrReply = async (req, res) => {
     try {
-        // const { userId } = req.user;
-        const actor = req.actor; // [Grok] Sử dụng req.actor để lấy thông tin người thực hiện hành động
+        const actor = req.actor;
         const { postId } = req.params;
         const { text, parentId } = req.body;
 
@@ -88,48 +89,63 @@ exports.commentOrReply = async (req, res) => {
             author: {
                 type: actor.type === 'shop' ? 'Shop' : 'User',
                 _id: actor._id
-            }, // [Grok] Tạo comment với author theo cấu trúc type và _id
+            },
             text,
             parentId: parentId || null
         });
 
         await comment.save();
 
+        // Populate thông tin author (User hoặc Shop)
+        const populatedComment = await Comment.findById(comment._id)
+            .populate({
+                path: 'author._id',
+                select: actor.type === 'shop' ? 'name avatar slug' : 'fullName avatar slug',
+                model: actor.type === 'shop' ? 'Shop' : 'User'
+            })
+            .lean();
+
         let commentsCount = 0;
         let replyCount = 0;
 
-        if (!parentId) { // Nếu là bình luận bài viết, tức là không có id comment cha thì nó là comment bài viết
+        if (!parentId) {
+            // Tạo interaction cho bình luận bài viết
             await UserInteraction.create({
                 author: {
                     type: actor.type === 'shop' ? 'Shop' : 'User',
                     _id: actor._id
-                }, // [Grok] Lưu author thay vì userId
+                },
                 targetType: 'post',
                 targetId: postId,
                 action: 'comment',
                 metadata: { text }
             });
 
-            const post = await Post.findByIdAndUpdate(postId, { $inc: { commentsCount: 1 } });
-            commentsCount = post.commentsCount; //tổng bình luận của 1 bài viết
-        } else {  // Nếu là reply cho comment, tức là có id_comment cha thì nó là reply (reply lại comment cha)
+            // Cập nhật số lượng bình luận của bài viết
+            const post = await Post.findByIdAndUpdate(postId, { $inc: { commentsCount: 1 } }, { new: true });
+            commentsCount = post.commentsCount;
+        } else {
+            // Tạo interaction cho reply comment
             await UserInteraction.create({
                 author: {
                     type: actor.type === 'shop' ? 'Shop' : 'User',
                     _id: actor._id
-                }, // [Grok] Lưu author thay vì userId
+                },
                 targetType: 'comment',
                 targetId: parentId,
                 action: 'comment',
                 metadata: { text }
             });
+
+            // Đếm số lượng reply của comment cha
             replyCount = await Comment.countDocuments({ parentId });
         }
 
-        const post = await Post.findById(postId);
-        commentsCount = post.commentsCount; //tổng bình luận của 1 bài viết
-
-        return successResponse(res, 'Bình luận thành công', { comment, commentsCount, replyCount });
+        return successResponse(res, 'Bình luận thành công', {
+            comment: populatedComment,
+            commentsCount,
+            replyCount
+        });
     } catch (err) {
         return errorResponse(res, 'Lỗi khi bình luận', 500, err.message);
     }
@@ -184,6 +200,72 @@ exports.likeComment = async (req, res) => {
     }
 };
 
+// Lấy danh sách like bình luận/reply
+exports.getCommentLikes = async (req, res) => {
+    try {
+        const { commentId } = req.params;
+        const { page = 1, limit = 10 } = req.query;
+
+        const pageNumber = parseInt(page, 10);
+        const limitNumber = parseInt(limit, 10);
+        const skip = (pageNumber - 1) * limitNumber;
+
+        // Lấy comment và populate thông tin likes
+        const comment = await Comment.findById(commentId)
+            .select('likes')
+            .lean();
+
+        if (!comment) {
+            return errorResponse(res, 'Không tìm thấy bình luận', 404);
+        }
+
+        // Lấy danh sách ID từ trường likes
+        const likeIds = comment.likes || [];
+        const totalLikes = likeIds.length;
+
+        // Phân trang
+        const paginatedIds = likeIds.slice(skip, skip + limitNumber);
+
+        // Tạo các promise để populate thông tin User/Shop
+        const userPromises = paginatedIds.map(id =>
+            mongoose.model('User').findById(id)
+                .select('fullName avatar slug')
+                .lean()
+                .then(user => user ? { ...user, type: 'User' } : null)
+        );
+
+        const shopPromises = paginatedIds.map(id =>
+            mongoose.model('Shop').findById(id)
+                .select('name avatar slug')
+                .lean()
+                .then(shop => shop ? { ...shop, type: 'Shop' } : null)
+        );
+
+        // Chạy song song cả 2 loại query
+        const [userResults, shopResults] = await Promise.all([
+            Promise.all(userPromises),
+            Promise.all(shopPromises)
+        ]);
+
+        // Kết hợp kết quả, ưu tiên User trước nếu tồn tại
+        const likes = userResults.map((user, index) =>
+            user || shopResults[index]
+        ).filter(Boolean);
+
+        return successResponse(res, 'Danh sách like bình luận', {
+            likes,
+            pagination: {
+                page: pageNumber,
+                limit: limitNumber,
+                total: totalLikes,
+                totalPages: Math.ceil(totalLikes / limitNumber)
+            }
+        });
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi lấy danh sách like bình luận', 500, err.message);
+    }
+};
+
 //Lấy bình luận dạng cây đến 3 tầng
 exports.getCommentsByPost = async (req, res) => {
     try {
@@ -196,23 +278,37 @@ exports.getCommentsByPost = async (req, res) => {
         const skip = (pageNumber - 1) * limitNumber;
 
         let sortQuery = {};
-        if (sortBy === 'top') {
-            sortQuery = { 'likes.length': -1, createdAt: -1 };
-        } else if (sortBy === 'newest') {
+        if (sortBy === 'newest') {
             sortQuery = { createdAt: -1 };
         } else if (sortBy === 'oldest') {
             sortQuery = { createdAt: 1 };
         } else {
+            // Mặc định sort theo createdAt nếu không phải top
             sortQuery = { createdAt: -1 };
         }
 
         // Lấy tầng 1 (bình luận gốc)
-        const comments = await Comment.find({ postId, parentId: null })
-            .populate('author._id', 'fullName avatar name') // [Grok] Populate author._id để lấy thông tin User hoặc Shop
-            .sort(sortQuery)
-            .skip(skip)
-            .limit(limitNumber);
+        let comments = await Comment.find({ postId, parentId: null })
+            .populate('author._id', 'fullName avatar name slug')
+            .sort(sortQuery);
 
+        // ✅ Nếu sortBy là 'top', sort theo số lượng likes trong JavaScript
+        if (sortBy === 'top') {
+            comments = comments.sort((a, b) => {
+                const likesA = a.likes?.length || 0;
+                const likesB = b.likes?.length || 0;
+
+                // Sort theo likes giảm dần, nếu bằng nhau thì sort theo createdAt mới nhất
+                if (likesB !== likesA) {
+                    return likesB - likesA;
+                }
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            });
+        }
+
+        // Apply pagination sau khi sort
+        const paginatedComments = comments.slice(skip, skip + limitNumber);
+        
         const commentMap = {};
 
         // Map tầng 1
@@ -231,7 +327,7 @@ exports.getCommentsByPost = async (req, res) => {
 
         // Lấy tầng 2
         const level2Replies = await Comment.find({ parentId: { $in: parentIdsLevel1 } })
-            .populate('author._id', 'fullName avatar name')
+            .populate('author._id', 'fullName avatar name slug')
             .sort({ createdAt: 1 });
 
         const parentIdsLevel2 = [];
@@ -252,23 +348,54 @@ exports.getCommentsByPost = async (req, res) => {
             }
         }
 
-        // Lấy tầng 3
-        const level3Replies = await Comment.find({ parentId: { $in: parentIdsLevel2 } })
-            .populate('author._id', 'fullName avatar name')
-            .sort({ createdAt: 1 });
+        // Lấy tất cả replies sâu hơn (tầng 4, 5, ...)
+        const deepReplies = await Comment.find({
+            parentId: { $nin: parentIdsLevel1 } // loại các replies tầng 2 ra, chỉ lấy sâu hơn
+        })
+            .populate('author._id', 'fullName avatar name slug')
+            .sort({ createdAt: 1 })
 
-        // Gắn tầng 3 vào đúng chỗ trong reply của tầng 1
-        for (let r of level3Replies) {
+        // Gắn các replies sâu hơn này vào reply tương ứng:
+        for (let r of deepReplies) {
+            if (!r?.parentId) continue; // Bỏ qua nếu không có parent
+
             for (let c of Object.values(commentMap)) {
-                const replyLv2 = c.replies.find(reply => reply._id.toString() === r.parentId.toString());
-                if (replyLv2) {
-                    replyLv2.replies.push({
-                        ...r._doc,
-                        isLiked: actor._id ? r.likes.includes(actor._id) : false,
-                        likeCount: r.likes.length
-                        // Tầng 3 không cần replyCount nữa (vì không hiển thị tầng 4)
-                    });
-                    break;
+                for (let replyLv2 of c.replies) {
+                    if (!replyLv2?._id) continue;
+
+                    if (replyLv2._id.toString() === r.parentId.toString()) {
+                        replyLv2.replies.push({
+                            ...r._doc,
+                            isLiked: actor._id ? r.likes.includes(actor._id) : false,
+                            likeCount: r.likes.length,
+                            replies: []
+                        });
+                        break;
+                    }
+
+                    // Duyệt sâu hơn
+                    const stack = [...(replyLv2.replies || [])];
+                    while (stack.length) {
+                        const node = stack.pop();
+                        if (!node?._id) continue;
+
+
+                        if (node._id.toString() === r.parentId.toString()) {
+                            node.replies = node.replies || [];
+                            node.replies.push({
+                                ...r._doc,
+                                isLiked: actor._id ? r.likes.includes(actor._id) : false,
+                                likeCount: r.likes.length,
+                                replies: [],
+                                replyingToName: node.author?.type === 'User'
+                                    ? node.author?._id?.fullName
+                                    : node.author?._id?.name,
+                            });
+
+                            break;
+                        }
+                        if (node.replies?.length) stack.push(...node.replies);
+                    }
                 }
             }
         }

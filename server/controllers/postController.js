@@ -1,4 +1,5 @@
 const Post = require('../models/Post');
+const Product = require('../models/Product');
 const Shop = require('../models/Shop');
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
@@ -30,28 +31,108 @@ exports.createPost = async (req, res) => {
     });
 
     const savedPost = await newPost.save();
+
+    // Cập nhật trường posts trong Product nếu có productIds
+    if (productIds && productIds.length > 0) {
+      await Product.updateMany(
+        {
+          _id: { $in: productIds },
+          allowPosts: true // Chỉ thêm vào sản phẩm cho phép đăng bài
+        },
+        { $addToSet: { posts: savedPost._id } }
+      );
+    }
+
     return successResponse(res, 'Tạo bài viết thành công', savedPost);
   } catch (err) {
     return errorResponse(res, 'Lỗi tạo bài viết', 500, err.message);
   }
 };
 
-// exports.getAllPosts = async (req, res) => {
-//   const page = parseInt(req.query.page) || 1;
-//   const limit = parseInt(req.query.limit) || 5;
-//   const skip = (page - 1) * limit;
-//   try {
-//     const posts = await Post.find()
-//       .sort({ createdAt: -1 })
-//       .skip(skip)
-//       .limit(limit)
-//       .populate('userId', 'fullName avatar')
-//     // .populate('productIds');
-//     return successResponse(res, 'Lấy danh sách bài viết', posts);
-//   } catch (err) {
-//     return errorResponse(res, 'Lỗi khi lấy danh sách', 500, err.message);
-//   }
-// };
+// Cập nhật bài viết
+exports.updatePost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const actorId = req.actor._id;
+
+    // Tìm bài viết hiện tại
+    const post = await Post.findById(id);
+    if (!post) {
+      return errorResponse(res, 'Bài viết không tồn tại', 404);
+    }
+
+    // Kiểm tra quyền sửa (chỉ author mới được sửa)
+    if (post.author._id.toString() !== actorId.toString()) {
+      return errorResponse(res, 'Bạn không có quyền sửa bài viết này', 403);
+    }
+
+    const {
+      content,
+      images = [],
+      videos = [],
+      productIds = [],
+      hashtags = [],
+      categories = [],
+      location,
+      privacy
+    } = req.body;
+
+    // Lưu lại productIds cũ để so sánh
+    const oldProductIds = post.productIds.map(id => id.toString());
+    const newProductIds = productIds.map(id => id.toString());
+
+    // Cập nhật thông tin bài viết
+    post.content = content || post.content;
+    post.images = images || post.images;
+    post.videos = videos || post.videos;
+    post.productIds = productIds || post.productIds;
+    post.hashtags = hashtags || post.hashtags;
+    post.categories = categories || post.categories;
+    post.location = location !== undefined ? location : post.location;
+    post.privacy = privacy || post.privacy;
+    post.updatedAt = Date.now();
+
+    const updatedPost = await post.save();
+
+    // Kiểm tra và cập nhật trường posts trong Product nếu có thay đổi productIds
+    if (JSON.stringify(oldProductIds) !== JSON.stringify(newProductIds)) {
+      await updateProductPosts(oldProductIds, newProductIds, post._id);
+    }
+
+    return successResponse(res, 'Cập nhật bài viết thành công', updatedPost);
+  } catch (err) {
+    return errorResponse(res, 'Lỗi khi cập nhật bài viết', 500, err.message);
+  }
+};
+
+// Helper function để cập nhật trường posts trong Product
+const updateProductPosts = async (oldProductIds, newProductIds, postId) => {
+  try {
+    const Product = mongoose.model('Product');
+
+    // Xóa postId khỏi các product cũ (nếu có)
+    if (oldProductIds.length > 0) {
+      await Product.updateMany(
+        { _id: { $in: oldProductIds } },
+        { $pull: { posts: postId } }
+      );
+    }
+
+    // Thêm postId vào các product mới (nếu có)
+    if (newProductIds.length > 0) {
+      await Product.updateMany(
+        {
+          _id: { $in: newProductIds },
+          allowPosts: true // Chỉ thêm vào sản phẩm cho phép đăng bài
+        },
+        { $addToSet: { posts: postId } } // $addToSet để tránh trùng lặp
+      );
+    }
+  } catch (error) {
+    console.error('Error updating product posts:', error);
+    throw error;
+  }
+};
 
 exports.getAllPosts = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
@@ -70,10 +151,30 @@ exports.getAllPosts = async (req, res) => {
         })
         .populate({
           path: 'sharedPost',
-          select: 'content images videos privacy createdAt author',
+          select: 'content images videos privacy createdAt author productIds',
+          populate: [
+            {
+              path: 'author._id',
+              select: 'fullName avatar name slug',
+            },
+            {
+              path: 'productIds',
+              select: 'name price discount images videos stock soldCount slug seller',
+              populate: {
+                path: 'seller',
+                select: 'name slug avatar',
+                model: 'Shop',
+              },
+            },
+          ],
+        })
+        .populate({
+          path: 'productIds',
+          select: 'name price discount images videos stock soldCount slug seller', // Các trường cần thiết của sản phẩm
           populate: {
-            path: 'author._id',
-            select: 'fullName avatar name slug'
+            path: 'seller',
+            select: 'name slug avatar', // Thông tin cần thiết về người bán
+            model: 'Shop' // Chỉ định model là Shop vì seller trong Product là ref đến Shop
           }
         }),
       Post.countDocuments()
@@ -100,7 +201,34 @@ exports.getPostById = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id)
       .populate('author._id', 'fullName avatar name slug')
-      .populate('productIds');
+      .populate({
+        path: 'sharedPost',
+        select: 'content images videos privacy createdAt author productIds',
+        populate: [
+          {
+            path: 'author._id',
+            select: 'fullName avatar name slug',
+          },
+          {
+            path: 'productIds',
+            select: 'name price discount images videos stock soldCount slug seller',
+            populate: {
+              path: 'seller',
+              select: 'name slug avatar',
+              model: 'Shop',
+            },
+          },
+        ],
+      })
+      .populate({
+        path: 'productIds',
+        select: 'name price discount images videos stock soldCount slug seller', // Các trường cần thiết của sản phẩm
+        populate: {
+          path: 'seller',
+          select: 'name slug avatar', // Thông tin cần thiết về người bán
+          model: 'Shop' // Chỉ định model là Shop vì seller trong Product là ref đến Shop
+        }
+      })
     if (!post) return errorResponse(res, 'Bài viết không tồn tại', 404);
     return successResponse(res, 'Chi tiết bài viết', post);
   } catch (err) {
@@ -164,10 +292,30 @@ exports.getPostsByAuthorSlug = async (req, res) => {
         })
         .populate({
           path: 'sharedPost',
-          select: 'content images videos privacy createdAt author',
+          select: 'content images videos privacy createdAt author productIds',
+          populate: [
+            {
+              path: 'author._id',
+              select: 'fullName avatar name slug',
+            },
+            {
+              path: 'productIds',
+              select: 'name price discount images videos stock soldCount slug seller',
+              populate: {
+                path: 'seller',
+                select: 'name slug avatar',
+                model: 'Shop',
+              },
+            },
+          ],
+        })
+        .populate({
+          path: 'productIds',
+          select: 'name price discount images videos stock soldCount slug seller', // Các trường cần thiết của sản phẩm
           populate: {
-            path: 'author._id',
-            select: 'fullName avatar coverImage name  slug'
+            path: 'seller',
+            select: 'name slug avatar', // Thông tin cần thiết về người bán
+            model: 'Shop' // Chỉ định model là Shop vì seller trong Product là ref đến Shop
           }
         }),
       Post.countDocuments(query)

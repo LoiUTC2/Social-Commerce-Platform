@@ -48,7 +48,7 @@ exports.setActor = async (req, res, next) => {
             req.actor = {
                 _id: shop._id,
                 type: 'shop',
-                name: shop.name,
+                fullName: shop.name,
                 avatar: shop.avatar,
                 sellerId: shop.seller?._id,
                 legalName: shop.seller?.legalName,
@@ -59,7 +59,7 @@ exports.setActor = async (req, res, next) => {
             req.actor = {
                 _id: user._id,
                 type: 'user',
-                name: user.fullName,
+                fullName: user.fullName,
                 avatar: user.avatar,
                 email: user.email,
                 shopId: user.shopId,

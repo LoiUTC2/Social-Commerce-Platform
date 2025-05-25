@@ -24,6 +24,18 @@ export const toggleProductStatus = async (productId) => {
     return res.data;
 };
 
+// Bật/tắt cho phép đăng bài viết kèm sản phẩm
+export const toggleAllowPosts = async (productId) => {
+    const res = await api.patch(`/products/${productId}/toggleAllowPosts`);
+    return res.data;
+};
+
+// Lấy danh sách sản phẩm cho phép đăng bài viết
+export const getProductsForPosts = async (page = 1, limit = 10, search = '') => {
+    const res = await api.get(`/products/forPosts?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`);
+    return res.data;
+};
+
 // Lấy danh sách sản phẩm nổi bật (dựa vào rating và soldCount)
 export const getFeaturedProducts = async (page = 1, limit = 20, category = null) => {
     const url = category
@@ -69,5 +81,23 @@ export const getProductDetailForSeller = async (slug) => {
 // Tìm sản phẩm theo slug (dạng rút gọn)
 export const getProductBySlug = async (slug) => {
     const res = await api.get(`/products/slug/${slug}`);
+    return res.data;
+};
+
+// Lấy danh sách bài viết của sản phẩm
+export const getProductPosts = async (productId, page = 1, limit = 10) => {
+    const res = await api.get(`/products/${productId}/posts?page=${page}&limit=${limit}`);
+    return res.data;
+};
+
+// Thêm bài viết vào sản phẩm
+export const addPostToProduct = async (productId, postId) => {
+    const res = await api.post(`/products/${productId}/posts`, { postId });
+    return res.data;
+};
+
+// Xóa bài viết khỏi sản phẩm
+export const removePostFromProduct = async (productId, postId) => {
+    const res = await api.delete(`/products/${productId}/posts/${postId}`);
     return res.data;
 };

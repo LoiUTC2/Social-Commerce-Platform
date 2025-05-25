@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const Product = require('./Product');
 
 const postSchema = new mongoose.Schema({
   // userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -20,10 +21,10 @@ const postSchema = new mongoose.Schema({
   location: String,
   isSponsored: { type: Boolean, default: false }, //được tài trợ
 
-  type: {type: String, enum: ['normal', 'share'], default: 'normal'},
+  type: { type: String, enum: ['normal', 'share'], default: 'normal' },
 
-  sharedPost: {type: mongoose.Schema.Types.ObjectId, ref: 'Post', default: null}, //đây là bài viết gốc (nếu nó là bài share), bản chất nó là 1 oject, lưu _id chỉ là đại diện thôi
-  privacy: {type: String, enum: ['public', 'friends', 'private'], default: 'public'},
+  sharedPost: { type: mongoose.Schema.Types.ObjectId, ref: 'Post', default: null }, //đây là bài viết gốc (nếu nó là bài share), bản chất nó là 1 oject, lưu _id chỉ là đại diện thôi
+  privacy: { type: String, enum: ['public', 'friends', 'private'], default: 'public' },
 
   likesCount: { type: Number, default: 0 },
   commentsCount: { type: Number, default: 0 },
@@ -35,6 +36,22 @@ const postSchema = new mongoose.Schema({
 
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
+});
+
+// Middleware tự động xóa id bài viết ra khỏi danh sách chứa bài viết của sản phẩm (Product)
+postSchema.pre('deleteOne', { document: true }, async function (next) {
+  try {
+    // Xóa bài viết khỏi các sản phẩm liên quan
+    if (this.productIds && this.productIds.length > 0) {
+      await Product.updateMany(
+        { _id: { $in: this.productIds } },
+        { $pull: { posts: this._id } }
+      );
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 module.exports = mongoose.model('Post', postSchema);

@@ -384,7 +384,13 @@ exports.getMyShop = async (req, res) => {
     const sellerId = req.actor._id.toString(); //này thực chất là shopID
 
     try {
-        const shop = await Shop.findOne({ _id: sellerId });
+        const shop = await Shop.findOne({ _id: sellerId })
+        .populate('owner', 'fullName avatar coverImage email phone')
+            .populate('seller')
+            .populate('productInfo.mainCategory', 'name')
+            .populate('productInfo.subCategories', 'name')
+            .populate('stats.followers', 'fullName avatar');
+            
         if (!shop) {
             return errorResponse(res, 'Bạn chưa có shop', 404);
         }
