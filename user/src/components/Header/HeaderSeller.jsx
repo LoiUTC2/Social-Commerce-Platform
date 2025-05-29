@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button';
 import DarkModeToggle from '../../components/common/DarkModeToggle';
 import { useNavigate } from 'react-router-dom';
 import HeaderChatIcon from '../chat/HeaderChatIcon';
-import UserMenu from '../common/UserMenu';
+import UserMenu from '../icons/UserMenu';
 import { useAuth } from '../../contexts/AuthContext';
 
 const HeaderSeller = () => {

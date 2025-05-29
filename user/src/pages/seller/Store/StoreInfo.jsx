@@ -64,7 +64,7 @@ const StoreInfo = () => {
       metaDescription: "",
       keywords: [],
     },
-    tags: [],
+    hashtags: [],
     status: {
       isActive: true,
     },
@@ -106,7 +106,7 @@ const StoreInfo = () => {
               metaDescription: "",
               keywords: [],
             },
-            tags: shopResponse.data.tags || [],
+            hashtags: shopResponse.data.hashtags || [],
           })
         }
 
@@ -236,15 +236,15 @@ const StoreInfo = () => {
     }))
   }
 
-  // Xử lý thêm/xóa tags
-  const handleTagsChange = (e) => {
+  // Xử lý thêm/xóa hashtags
+  const handlehashtagsChange = (e) => {
     if (e.key === "Enter") {
       e.preventDefault()
       const value = e.target.value.trim()
-      if (value && !shopData.tags.includes(value)) {
+      if (value && !shopData.hashtags.includes(value)) {
         setShopData((prev) => ({
           ...prev,
-          tags: [...prev.tags, value],
+          hashtags: [...prev.hashtags, value],
         }))
         e.target.value = ""
       }
@@ -254,7 +254,7 @@ const StoreInfo = () => {
   const removeTag = (tagToRemove) => {
     setShopData((prev) => ({
       ...prev,
-      tags: prev.tags.filter((tag) => tag !== tagToRemove),
+      hashtags: prev.hashtags.filter((tag) => tag !== tagToRemove),
     }))
   }
 
@@ -494,9 +494,9 @@ const StoreInfo = () => {
                 </div>
 
                 <div className="space-y-2 mt-4">
-                  <Label>Tags cửa hàng</Label>
+                  <Label>hashtags cửa hàng</Label>
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {shopData.tags?.map((tag, index) => (
+                    {shopData.hashtags?.map((tag, index) => (
                       <Badge key={index} variant="outline" className="flex items-center gap-1 px-2 py-1">
                         <Tag className="h-3 w-3" />
                         {tag}
@@ -510,7 +510,7 @@ const StoreInfo = () => {
                       </Badge>
                     ))}
                   </div>
-                  <Input placeholder="Nhập tag và nhấn Enter" onKeyPress={handleTagsChange} />
+                  <Input placeholder="Nhập tag và nhấn Enter" onKeyPress={handlehashtagsChange} />
                   <p className="text-xs text-gray-500">Nhấn Enter để thêm tag</p>
                 </div>
               </CardContent>

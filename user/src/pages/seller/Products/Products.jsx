@@ -389,7 +389,7 @@ export default function Products() {
                         {product.discount > 0 ? (
                           <div className="flex flex-col">
                             <span className="font-medium text-pink-600">
-                              {formatCurrency(product.price - product.discount)}
+                              {formatCurrency(product.price - (product.price * product.discount/100))}
                             </span>
                             <span className="text-xs text-gray-500 line-through">
                               {formatCurrency(product.price)}

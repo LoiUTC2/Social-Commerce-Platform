@@ -20,7 +20,7 @@ exports.getAllProductsForAdmin = async (req, res) => {
         query.$or = [
             { name: regex },
             { description: regex },
-            { tags: regex }
+            { hashtags: regex }
         ];
     }
 

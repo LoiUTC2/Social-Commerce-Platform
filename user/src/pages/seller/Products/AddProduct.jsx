@@ -39,6 +39,7 @@ const schema = yup.object().shape({
         .nullable()
         .transform((value) => (value === null || value === '' ? undefined : Number(value)))
         .min(0, 'Giảm giá phải là số không âm')
+        .max(100, 'Giảm giá tối đa 100%')
         .when('price', (price, schema) =>
             price && price > 0
                 ? schema.test(
@@ -51,7 +52,7 @@ const schema = yup.object().shape({
         .nullable(),
     brand: yup.string().nullable(),
     condition: yup.string().oneOf(['new', 'used'], 'Tình trạng không hợp lệ').required('Tình trạng là bắt buộc'),
-    tags: yup.string().nullable(),
+    hashtags: yup.string().nullable(),
     variants: yup.array().of(
         yup.object().shape({
             name: yup.string().trim().required('Tên biến thể là bắt buộc'),
@@ -82,7 +83,7 @@ export default function AddProduct() {
             category: '',
             brand: '',
             condition: 'new',
-            tags: '',
+            hashtags: '',
             images: [],
             videos: [],
             variants: [],
@@ -234,7 +235,7 @@ export default function AddProduct() {
                 brand: data.brand,
                 condition: data.condition,
                 variants: data.variants,
-                tags: data.tags ? data.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
+                hashtags: data.hashtags ? data.hashtags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
             };
 
             console.log('Product data to be sent:', productData);
@@ -368,11 +369,11 @@ export default function AddProduct() {
                                         name="discount"
                                         render={({ field }) => (
                                             <FormItem className="space-y-2">
-                                                <FormLabel>Giảm giá</FormLabel>
+                                                <FormLabel>Giảm giá (%)</FormLabel>
                                                 <FormControl>
                                                     <Input
                                                         type="number"
-                                                        placeholder="Nhập giảm giá (VNĐ)"
+                                                        placeholder="Nhập % giảm giá"
                                                         value={field.value || ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
@@ -559,13 +560,13 @@ export default function AddProduct() {
                                     />
                                 </div>
 
-                                {/* Tags */}
+                                {/* hashtags */}
                                 <FormField
                                     control={form.control}
-                                    name="tags"
+                                    name="hashtags"
                                     render={({ field }) => (
                                         <FormItem className="space-y-2">
-                                            <FormLabel>Thẻ (Tags)</FormLabel>
+                                            <FormLabel>Thẻ (hashtags)</FormLabel>
                                             <FormControl>
                                                 <Input placeholder="Nhập các thẻ, phân tách bằng dấu phẩy" {...field} />
                                             </FormControl>

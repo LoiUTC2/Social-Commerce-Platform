@@ -5,87 +5,146 @@ import { Card, CardContent } from '../../components/ui/card';
 import DailySuggestions from '../../components/marketplace/DailySuggestions';
 import { getProductDetailForUser } from '../../services/productService';
 import { Heart, Share2, ShoppingCart, MessageCircle, Star, Truck, Shield, RotateCcw, Award } from 'lucide-react';
+import { toast } from 'sonner';
+import { useCart } from '../../contexts/CartContext';
+
 
 export default function ProductDetail() {
-  const { slug } = useParams();
-  const navigate = useNavigate();
+  const { slug } = useParams()
+  const navigate = useNavigate()
+  const { addItemToCart, buyNow, loading: cartLoading } = useCart()
 
-  const [product, setProduct] = useState(null);
-  const [relatedProducts, setRelatedProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [quantity, setQuantity] = useState(1);
-  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [currentMediaType, setCurrentMediaType] = useState('video'); // 'image' or 'video'
-  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
-  const [isLiked, setIsLiked] = useState(false);
-  const [activeTab, setActiveTab] = useState('description');
+  const [product, setProduct] = useState(null)
+  const [relatedProducts, setRelatedProducts] = useState([])
+  const [selectedVariants, setSelectedVariants] = useState({})
+  const [isAddingToCart, setIsAddingToCart] = useState(false)
+  const [isBuyingNow, setIsBuyingNow] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [quantity, setQuantity] = useState(1)
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const [currentMediaType, setCurrentMediaType] = useState("video")
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0)
+  const [isLiked, setIsLiked] = useState(false)
+  const [activeTab, setActiveTab] = useState("description")
 
   useEffect(() => {
-    // window.scrollTo(0, 0);
-    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    fetchProductDetail();
-  }, [slug]);
+    window.scrollTo({ top: 0, left: 0, behavior: "smooth" })
+    fetchProductDetail()
+  }, [slug])
 
-  // Set default media type when product loads
   useEffect(() => {
     if (product) {
-      const videos = product.videos && product.videos.length > 0 ? product.videos : [];
-      const defaultType = videos.length > 0 ? 'video' : 'image';
-      setCurrentMediaType(defaultType);
-      setCurrentMediaIndex(0);
+      const videos = product.videos && product.videos.length > 0 ? product.videos : []
+      const defaultType = videos.length > 0 ? "video" : "image"
+      setCurrentMediaType(defaultType)
+      setCurrentMediaIndex(0)
     }
-  }, [product]);
+  }, [product])
 
   const fetchProductDetail = async () => {
     try {
-      setLoading(true);
-      const response = await getProductDetailForUser(slug);
+      setLoading(true)
+      const response = await getProductDetailForUser(slug)
       if (response.success) {
-        console.log("chi tiết sp:", response.data.product)
-        setProduct(response.data.product);
-        setRelatedProducts(response.data.relatedProducts);
+        setProduct(response.data.product)
+        setRelatedProducts(response.data.relatedProducts)
       } else {
-        setError('Không thể tải thông tin sản phẩm');
+        setError("Không thể tải thông tin sản phẩm")
       }
     } catch (err) {
-      setError('Lỗi kết nối. Vui lòng thử lại sau.');
-      console.error('Error fetching product:', err);
+      setError("Lỗi kết nối. Vui lòng thử lại sau.")
+      console.error("Error fetching product:", err)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleQuantityChange = (newQuantity) => {
     if (newQuantity >= 1 && newQuantity <= product?.stock) {
-      setQuantity(newQuantity);
+      setQuantity(newQuantity)
     }
-  };
+  }
 
   const formatPrice = (price) => {
-    return new Intl.NumberFormat('vi-VN').format(price);
-  };
+    return new Intl.NumberFormat("vi-VN").format(price)
+  }
 
   const calculateDiscountedPrice = (price, discount) => {
-    return price - discount;
-  };
+    return price - (price * discount) / 100
+  }
 
-  const renderStars = (rating, size = 'sm') => {
-    const stars = [];
-    const fullStars = Math.floor(rating);
-    const hasHalfStar = rating % 1 !== 0;
+  const renderStars = (rating, size = "sm") => {
+    const stars = []
+    const fullStars = Math.floor(rating)
+    const hasHalfStar = rating % 1 !== 0
 
     for (let i = 0; i < 5; i++) {
       if (i < fullStars) {
-        stars.push(<Star key={i} className={`${size === 'sm' ? 'w-4 h-4' : 'w-5 h-5'} fill-yellow-400 text-yellow-400`} />);
+        stars.push(
+          <Star key={i} className={`${size === "sm" ? "w-4 h-4" : "w-5 h-5"} fill-yellow-400 text-yellow-400`} />,
+        )
       } else if (i === fullStars && hasHalfStar) {
-        stars.push(<Star key={i} className={`${size === 'sm' ? 'w-4 h-4' : 'w-5 h-5'} fill-yellow-400 text-yellow-400`} style={{ clipPath: 'inset(0 50% 0 0)' }} />);
+        stars.push(
+          <Star
+            key={i}
+            className={`${size === "sm" ? "w-4 h-4" : "w-5 h-5"} fill-yellow-400 text-yellow-400`}
+            style={{ clipPath: "inset(0 50% 0 0)" }}
+          />,
+        )
       } else {
-        stars.push(<Star key={i} className={`${size === 'sm' ? 'w-4 h-4' : 'w-5 h-5'} text-gray-300`} />);
+        stars.push(<Star key={i} className={`${size === "sm" ? "w-4 h-4" : "w-5 h-5"} text-gray-300`} />)
       }
     }
-    return stars;
-  };
+    return stars
+  }
+
+  const validateVariants = () => {
+    if (product.variants && product.variants.length > 0) {
+      for (const variant of product.variants) {
+        if (!selectedVariants[variant.name]) {
+          toast.info(`Vui lòng chọn ${variant.name}`)
+          return false
+        }
+      }
+    }
+    return true
+  }
+
+  const handleAddToCart = async () => {
+    if (!validateVariants()) return
+
+    try {
+      setIsAddingToCart(true)
+      await addItemToCart(product._id, quantity, selectedVariants)
+    } catch (error) {
+      console.error("Error adding to cart:", error)
+    } finally {
+      setIsAddingToCart(false)
+    }
+  }
+
+  const handleBuyNow = async () => {
+    if (!validateVariants()) return
+
+    try {
+      setIsBuyingNow(true)
+      await buyNow(product._id, quantity, selectedVariants)
+      // Navigate to cart page instead of checkout
+      navigate("/marketplace/cart")
+    } catch (error) {
+      console.error("Error buying now:", error)
+    } finally {
+      setIsBuyingNow(false)
+    }
+  }
+
+  const handleVariantSelect = (variantName, option) => {
+    setSelectedVariants((prev) => ({
+      ...prev,
+      [variantName]: option,
+    }))
+  }
 
   if (loading) {
     return (
@@ -95,7 +154,7 @@ export default function ProductDetail() {
           <p className="mt-4 text-gray-600">Đang tải thông tin sản phẩm...</p>
         </div>
       </div>
-    );
+    )
   }
 
   if (error) {
@@ -106,7 +165,7 @@ export default function ProductDetail() {
           <Button onClick={fetchProductDetail}>Thử lại</Button>
         </div>
       </div>
-    );
+    )
   }
 
   if (!product) {
@@ -114,48 +173,47 @@ export default function ProductDetail() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <p className="text-gray-600">Không tìm thấy sản phẩm</p>
       </div>
-    );
+    )
   }
 
-  const discountedPrice = product.discount > 0 ? calculateDiscountedPrice(product.price, product.discount) : product.price;
-  const images = product.images && product.images.length > 0 ? product.images : [];
-  const videos = product.videos && product.videos.length > 0 ? product.videos : [];
-  const hasMedia = images.length > 0 || videos.length > 0;
+  const discountedPrice =
+    product.discount > 0 ? calculateDiscountedPrice(product.price, product.discount) : product.price
+  const images = product.images && product.images.length > 0 ? product.images : []
+  const videos = product.videos && product.videos.length > 0 ? product.videos : []
+  const hasMedia = images.length > 0 || videos.length > 0
 
   const getCurrentMedia = () => {
-    if (currentMediaType === 'video' && videos.length > 0) {
-      return videos[currentMediaIndex];
-    } else if (currentMediaType === 'image' && images.length > 0) {
-      return images[currentMediaIndex];
+    if (currentMediaType === "video" && videos.length > 0) {
+      return videos[currentMediaIndex]
+    } else if (currentMediaType === "image" && images.length > 0) {
+      return images[currentMediaIndex]
     }
-    return '/placeholder-image.jpg';
-  };
+    return "/placeholder-image.jpg"
+  }
 
   const getAllMediaItems = () => {
-    const mediaItems = [];
+    const mediaItems = []
 
-    // Add videos first
     videos.forEach((video, index) => {
       mediaItems.push({
-        type: 'video',
+        type: "video",
         src: video,
         index: index,
-        thumbnail: video // You might want to generate video thumbnails
-      });
-    });
+        thumbnail: video,
+      })
+    })
 
-    // Then add images
     images.forEach((image, index) => {
       mediaItems.push({
-        type: 'image',
+        type: "image",
         src: image,
         index: index,
-        thumbnail: image
-      });
-    });
+        thumbnail: image,
+      })
+    })
 
-    return mediaItems;
-  };
+    return mediaItems
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -163,15 +221,13 @@ export default function ProductDetail() {
       <div className="bg-white py-3 px-4 shadow-sm">
         <div className="max-w-7xl mx-auto">
           <nav className="text-sm text-gray-600">
-            <span className="hover:text-pink-500 cursor-pointer" onClick={() => navigate('/marketplace')}>
+            <span className="hover:text-pink-500 cursor-pointer" onClick={() => navigate("/marketplace")}>
               Marketplace
             </span>
             {product.categories && product.categories.length > 0 && (
               <>
                 <span className="mx-2">›</span>
-                <span className="hover:text-pink-500 cursor-pointer">
-                  {product.categories[0].name}
-                </span>
+                <span className="hover:text-pink-500 cursor-pointer">{product.categories[0].name}</span>
               </>
             )}
             <span className="mx-2">›</span>
@@ -189,12 +245,12 @@ export default function ProductDetail() {
               <div className="lg:w-2/5 p-6">
                 <div className="space-y-4">
                   <div className="relative group">
-                    {currentMediaType === 'video' ? (
+                    {currentMediaType === "video" ? (
                       <video
                         src={getCurrentMedia()}
                         controls
-                        autoPlay={true} // Tự động phát
-                        muted // Tắt âm thanh mặc định để tránh lỗi autoPlay trên một số trình duyệt
+                        autoPlay={true}
+                        muted
                         loop
                         className="w-full h-96 object-cover rounded-lg shadow-md bg-black"
                         poster="/video-placeholder.jpg"
@@ -204,7 +260,7 @@ export default function ProductDetail() {
                       </video>
                     ) : (
                       <img
-                        src={getCurrentMedia()}
+                        src={getCurrentMedia() || "/placeholder.svg"}
                         alt={product.name}
                         className="w-full h-96 object-cover rounded-lg shadow-md"
                       />
@@ -219,11 +275,10 @@ export default function ProductDetail() {
                       onClick={() => setIsLiked(!isLiked)}
                       className="absolute top-4 right-4 p-2 bg-white rounded-full shadow-md hover:shadow-lg transition-shadow"
                     >
-                      <Heart className={`w-5 h-5 ${isLiked ? 'fill-red-500 text-red-500' : 'text-gray-600'}`} />
+                      <Heart className={`w-5 h-5 ${isLiked ? "fill-red-500 text-red-500" : "text-gray-600"}`} />
                     </button>
 
-                    {/* Media type indicator */}
-                    {currentMediaType === 'video' && (
+                    {currentMediaType === "video" && (
                       <div className="absolute bottom-4 left-4 bg-black bg-opacity-70 text-white px-2 py-1 rounded text-xs">
                         📹 Video
                       </div>
@@ -235,22 +290,18 @@ export default function ProductDetail() {
                     <div className="flex gap-2 overflow-x-auto">
                       {getAllMediaItems().map((mediaItem, index) => (
                         <div key={`${mediaItem.type}-${mediaItem.index}`} className="relative flex-shrink-0">
-                          {mediaItem.type === 'video' ? (
+                          {mediaItem.type === "video" ? (
                             <div
-                              className={`relative w-16 h-16 rounded-md cursor-pointer border-2 transition-colors overflow-hidden ${currentMediaType === 'video' && currentMediaIndex === mediaItem.index
-                                  ? 'border-pink-500'
-                                  : 'border-gray-200 hover:border-gray-300'
+                              className={`relative w-16 h-16 rounded-md cursor-pointer border-2 transition-colors overflow-hidden ${currentMediaType === "video" && currentMediaIndex === mediaItem.index
+                                  ? "border-pink-500"
+                                  : "border-gray-200 hover:border-gray-300"
                                 }`}
                               onClick={() => {
-                                setCurrentMediaType('video');
-                                setCurrentMediaIndex(mediaItem.index);
+                                setCurrentMediaType("video")
+                                setCurrentMediaIndex(mediaItem.index)
                               }}
                             >
-                              <video
-                                src={mediaItem.src}
-                                className="w-full h-full object-cover"
-                                muted
-                              />
+                              <video src={mediaItem.src} className="w-full h-full object-cover" muted />
                               <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center">
                                 <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
                                   <div className="w-0 h-0 border-l-2 border-l-gray-800 border-y-1 border-y-transparent ml-0.5"></div>
@@ -262,15 +313,15 @@ export default function ProductDetail() {
                             </div>
                           ) : (
                             <img
-                              src={mediaItem.thumbnail}
+                              src={mediaItem.thumbnail || "/placeholder.svg"}
                               alt={`${product.name} ${mediaItem.index + 1}`}
-                              className={`w-16 h-16 object-cover rounded-md cursor-pointer border-2 transition-colors ${currentMediaType === 'image' && currentMediaIndex === mediaItem.index
-                                  ? 'border-pink-500'
-                                  : 'border-gray-200 hover:border-gray-300'
+                              className={`w-16 h-16 object-cover rounded-md cursor-pointer border-2 transition-colors ${currentMediaType === "image" && currentMediaIndex === mediaItem.index
+                                  ? "border-pink-500"
+                                  : "border-gray-200 hover:border-gray-300"
                                 }`}
                               onClick={() => {
-                                setCurrentMediaType('image');
-                                setCurrentMediaIndex(mediaItem.index);
+                                setCurrentMediaType("image")
+                                setCurrentMediaIndex(mediaItem.index)
                               }}
                             />
                           )}
@@ -300,13 +351,9 @@ export default function ProductDetail() {
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <div className="flex items-baseline gap-3">
                       {product.discount > 0 && (
-                        <span className="text-lg text-gray-400 line-through">
-                          ₫{formatPrice(product.price)}
-                        </span>
+                        <span className="text-lg text-gray-400 line-through">₫{formatPrice(product.price)}</span>
                       )}
-                      <span className="text-3xl font-bold text-pink-500">
-                        ₫{formatPrice(discountedPrice)}
-                      </span>
+                      <span className="text-3xl font-bold text-pink-500">₫{formatPrice(discountedPrice)}</span>
                       {product.discount > 0 && (
                         <span className="bg-pink-500 text-white px-2 py-1 rounded text-sm font-medium">
                           {product.discount}% GIẢM
@@ -321,14 +368,16 @@ export default function ProductDetail() {
                   <div className="space-y-3">
                     {product.variants.map((variant, index) => (
                       <div key={index}>
-                        <span className="text-sm font-medium text-gray-700 mb-2 block">
-                          {variant.name}:
-                        </span>
+                        <span className="text-sm font-medium text-gray-700 mb-2 block">{variant.name}:</span>
                         <div className="flex flex-wrap gap-2">
                           {variant.options.map((option, optionIndex) => (
                             <button
                               key={optionIndex}
-                              className="px-4 py-2 border border-gray-300 rounded-md hover:border-pink-500 hover:text-pink-500 transition-colors"
+                              onClick={() => handleVariantSelect(variant.name, option)}
+                              className={`px-4 py-2 border rounded-md transition-colors ${selectedVariants[variant.name] === option
+                                  ? "border-pink-500 bg-pink-50 text-pink-500"
+                                  : "border-gray-300 hover:border-pink-500 hover:text-pink-500"
+                                }`}
                             >
                               {option}
                             </button>
@@ -353,7 +402,7 @@ export default function ProductDetail() {
                     <input
                       type="number"
                       value={quantity}
-                      onChange={(e) => handleQuantityChange(parseInt(e.target.value) || 1)}
+                      onChange={(e) => handleQuantityChange(Number.parseInt(e.target.value) || 1)}
                       className="w-16 text-center py-2 border-none outline-none"
                       min="1"
                       max={product.stock}
@@ -366,9 +415,7 @@ export default function ProductDetail() {
                       +
                     </button>
                   </div>
-                  <span className="text-sm text-gray-600">
-                    {product.stock} sản phẩm có sẵn
-                  </span>
+                  <span className="text-sm text-gray-600">{product.stock} sản phẩm có sẵn</span>
                 </div>
 
                 {/* Action Buttons */}
@@ -376,15 +423,18 @@ export default function ProductDetail() {
                   <Button
                     variant="outline"
                     className="flex-1 border-pink-500 text-pink-500 hover:bg-pink-50"
+                    onClick={handleAddToCart}
+                    disabled={isAddingToCart || cartLoading}
                   >
                     <ShoppingCart className="w-4 h-4 mr-2" />
-                    Thêm vào giỏ hàng
+                    {isAddingToCart || cartLoading ? "Đang thêm..." : "Thêm vào giỏ hàng"}
                   </Button>
                   <Button
                     className="flex-1 bg-pink-500 hover:bg-pink-600"
-                    onClick={() => navigate('/marketplace/cart')}
+                    onClick={handleBuyNow}
+                    disabled={isBuyingNow || cartLoading}
                   >
-                    Mua ngay
+                    {isBuyingNow ? "Đang xử lý..." : "Mua ngay"}
                   </Button>
                 </div>
 
@@ -406,20 +456,21 @@ export default function ProductDetail() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <img
-                  src={product.seller?.avatar || '/default-avatar.png'}
+                  src={product.seller?.avatar || "/default-avatar.png"}
                   alt={product.seller?.name || product.seller?.username}
                   className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
+                  onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}
                 />
                 <div>
-                  <h3 className="font-bold text-lg text-gray-900">
+                  <h3 className="font-bold text-lg text-gray-900 cursor-pointer hover:underline" onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}>
                     {product.seller?.name || product.seller?.username}
                   </h3>
                   <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
                     <span>Online 2 giờ trước</span>
                     <span>|</span>
                     <div className="flex items-center gap-1">
-                      <div className="flex">{renderStars(4.8)}</div>
-                      <span>(4.8)</span>
+                      <div className="flex">{renderStars(product.seller?.stats?.rating?.avg)}</div>
+                      <span>({product.seller?.stats?.rating?.avg})</span>
                     </div>
                   </div>
                 </div>
@@ -429,9 +480,7 @@ export default function ProductDetail() {
                   <MessageCircle className="w-4 h-4" />
                   Chat ngay
                 </Button>
-                <Button variant="outline">
-                  Xem shop
-                </Button>
+                <Button variant="outline" onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}>Xem shop</Button>
               </div>
             </div>
           </CardContent>
@@ -478,28 +527,28 @@ export default function ProductDetail() {
             <div className="border-b">
               <div className="flex">
                 <button
-                  onClick={() => setActiveTab('description')}
-                  className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === 'description'
-                      ? 'border-pink-500 text-pink-500'
-                      : 'border-transparent text-gray-600 hover:text-gray-900'
+                  onClick={() => setActiveTab("description")}
+                  className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === "description"
+                      ? "border-pink-500 text-pink-500"
+                      : "border-transparent text-gray-600 hover:text-gray-900"
                     }`}
                 >
                   Mô tả sản phẩm
                 </button>
                 <button
-                  onClick={() => setActiveTab('specifications')}
-                  className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === 'specifications'
-                      ? 'border-pink-500 text-pink-500'
-                      : 'border-transparent text-gray-600 hover:text-gray-900'
+                  onClick={() => setActiveTab("specifications")}
+                  className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === "specifications"
+                      ? "border-pink-500 text-pink-500"
+                      : "border-transparent text-gray-600 hover:text-gray-900"
                     }`}
                 >
                   Thông số kỹ thuật
                 </button>
                 <button
-                  onClick={() => setActiveTab('reviews')}
-                  className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === 'reviews'
-                      ? 'border-pink-500 text-pink-500'
-                      : 'border-transparent text-gray-600 hover:text-gray-900'
+                  onClick={() => setActiveTab("reviews")}
+                  className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === "reviews"
+                      ? "border-pink-500 text-pink-500"
+                      : "border-transparent text-gray-600 hover:text-gray-900"
                     }`}
                 >
                   Đánh giá ({product.ratings?.count || 0})
@@ -508,15 +557,13 @@ export default function ProductDetail() {
             </div>
 
             <div className="p-6">
-              {activeTab === 'description' && (
+              {activeTab === "description" && (
                 <div className="prose max-w-none">
-                  <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
-                    {product.description}
-                  </p>
+                  <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{product.description}</p>
                 </div>
               )}
 
-              {activeTab === 'specifications' && (
+              {activeTab === "specifications" && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex justify-between py-2 border-b">
@@ -525,13 +572,11 @@ export default function ProductDetail() {
                     </div>
                     <div className="flex justify-between py-2 border-b">
                       <span className="text-gray-600">Thương hiệu:</span>
-                      <span className="font-medium">{product.brand || 'Không xác định'}</span>
+                      <span className="font-medium">{product.brand || "Không xác định"}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b">
                       <span className="text-gray-600">Tình trạng:</span>
-                      <span className="font-medium">
-                        {product.condition === 'new' ? 'Mới' : 'Đã sử dụng'}
-                      </span>
+                      <span className="font-medium">{product.condition === "new" ? "Mới" : "Đã sử dụng"}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b">
                       <span className="text-gray-600">Kho hàng:</span>
@@ -541,7 +586,7 @@ export default function ProductDetail() {
                 </div>
               )}
 
-              {activeTab === 'reviews' && (
+              {activeTab === "reviews" && (
                 <div className="space-y-6">
                   <div className="text-center py-8 text-gray-500">
                     <Award className="w-12 h-12 mx-auto mb-3 text-gray-400" />
@@ -567,21 +612,15 @@ export default function ProductDetail() {
                 >
                   <CardContent className="p-3">
                     <img
-                      src={relatedProduct.images?.[0] || '/placeholder-image.jpg'}
+                      src={relatedProduct.images?.[0] || "/placeholder-image.jpg"}
                       alt={relatedProduct.name}
                       className="w-full h-32 object-cover rounded-md mb-2"
                     />
-                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2 mb-1">
-                      {relatedProduct.name}
-                    </h3>
-                    <p className="text-pink-500 font-bold text-sm">
-                      ₫{formatPrice(relatedProduct.price)}
-                    </p>
+                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2 mb-1">{relatedProduct.name}</h3>
+                    <p className="text-pink-500 font-bold text-sm">₫{formatPrice(relatedProduct.price)}</p>
                     <div className="flex items-center gap-1 mt-1">
                       <div className="flex">{renderStars(relatedProduct.ratings?.avg || 0)}</div>
-                      <span className="text-xs text-gray-500">
-                        ({relatedProduct.soldCount || 0})
-                      </span>
+                      <span className="text-xs text-gray-500">({relatedProduct.soldCount || 0})</span>
                     </div>
                   </CardContent>
                 </Card>
@@ -597,5 +636,5 @@ export default function ProductDetail() {
         </section>
       </div>
     </div>
-  );
+  )
 }

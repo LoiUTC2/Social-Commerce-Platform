@@ -6,11 +6,14 @@ import AuthRoutes from './authRoutes';
 import HomepageRoutes from './homepageRoutes';
 import SellerRoutes from './sellerRoutes';
 import ChatRoutes from './chatRoutes';
+import SearchRoutes from './searchRoutes';
+
 export default function AppRoutes() {
   return (
       <Routes>
         {HomepageRoutes}
         {AuthRoutes}
+        {SearchRoutes}
         {SocialRoutes}
         {MarketplaceRoutes}
         {SellerRoutes}

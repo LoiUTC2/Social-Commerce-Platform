@@ -122,7 +122,7 @@ const UserMenu = () => {
                         }
 
                         <DropdownMenuSeparator /> {/* này là dấu gạch đen chia cắt*/}
-                        <DropdownMenuItem onClick={() => navigate('/auth/registerShop')}>
+                        <DropdownMenuItem onClick={() => navigate('/feed/orders')}>
                             Đơn mua
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />

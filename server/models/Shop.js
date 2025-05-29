@@ -96,16 +96,29 @@ const shopSchema = new mongoose.Schema({
     stats: {
         rating: {
             avg: { type: Number, default: 0 },
-            count: { type: Number, default: 0 }
+            count: { type: Number, default: 0 },
+            breakdown: { // ✅ Thêm breakdown để thống kê từng sao
+                1: { type: Number, default: 0 },
+                2: { type: Number, default: 0 },
+                3: { type: Number, default: 0 },
+                4: { type: Number, default: 0 },
+                5: { type: Number, default: 0 }
+            }
         },
         followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
         views: { type: Number, default: 0 },
         orderCount: { type: Number, default: 0 },
-        revenue: { type: Number, default: 0 }
+        revenue: { type: Number, default: 0 },
+
+        // Thống kê review khách hàng
+        customerReviews: {
+            totalGiven: { type: Number, default: 0 }, // số review đã cho khách hàng
+            avgRatingGiven: { type: Number, default: 0 } // điểm TB đã cho khách hàng
+        }
     },
 
-    // Từ khóa và tags
-    tags: [{ type: String }],
+    // Từ khóa và hashtags
+    hashtags: [{ type: String }],
 
     // Trạng thái hoạt động
     status: {
@@ -144,7 +157,7 @@ const shopSchema = new mongoose.Schema({
 // Function to create slug from shop name
 function createSlug(text) {
     if (!text) return '';
-    
+
     return text
         .toLowerCase()
         .trim()
@@ -165,20 +178,20 @@ function createSlug(text) {
 async function generateUniqueSlug(baseSlug, shopId = null) {
     let slug = baseSlug;
     let counter = 1;
-    
+
     while (true) {
         // Check if slug exists (excluding current shop if updating)
         const query = { slug: slug };
         if (shopId) {
             query._id = { $ne: shopId };
         }
-        
+
         const existingShop = await mongoose.model('Shop').findOne(query);
-        
+
         if (!existingShop) {
             return slug;
         }
-        
+
         // If slug exists, append counter
         slug = `${baseSlug}-${counter}`;
         counter++;
@@ -186,17 +199,17 @@ async function generateUniqueSlug(baseSlug, shopId = null) {
 }
 
 // Pre-save middleware to generate slug
-shopSchema.pre('save', async function(next) {
+shopSchema.pre('save', async function (next) {
     try {
         // Only generate slug if name exists and (slug doesn't exist or name has changed)
         if (this.name && (!this.slug || this.isModified('name'))) {
             const baseSlug = createSlug(this.name);
-            
+
             if (baseSlug) {
                 this.slug = await generateUniqueSlug(baseSlug, this._id);
             }
         }
-        
+
         next();
     } catch (error) {
         next(error);
@@ -204,22 +217,22 @@ shopSchema.pre('save', async function(next) {
 });
 
 // Pre-update middleware for findOneAndUpdate
-shopSchema.pre(['findOneAndUpdate', 'updateOne'], async function(next) {
+shopSchema.pre(['findOneAndUpdate', 'updateOne'], async function (next) {
     try {
         const update = this.getUpdate();
-        
+
         // Check if name is being updated
         if (update.name || (update.$set && update.$set.name)) {
             const newName = update.name || update.$set.name;
-            
+
             if (newName) {
                 const baseSlug = createSlug(newName);
-                
+
                 if (baseSlug) {
                     // Get the document being updated to exclude it from uniqueness check
                     const docId = this.getQuery()._id;
                     const uniqueSlug = await generateUniqueSlug(baseSlug, docId);
-                    
+
                     if (update.$set) {
                         update.$set.slug = uniqueSlug;
                     } else {
@@ -228,7 +241,7 @@ shopSchema.pre(['findOneAndUpdate', 'updateOne'], async function(next) {
                 }
             }
         }
-        
+
         next();
     } catch (error) {
         next(error);
@@ -252,7 +265,7 @@ shopSchema.post('save', async function (doc, next) {
 });
 
 // Tự động xóa số lượng shop bán sản phẩm đang thuộc danh mục sản phẩm nào đó, Khi xóa shop vĩnh viễn
- // Lưu ý: "this" ở đây là query, không phải document
+// Lưu ý: "this" ở đây là query, không phải document
 shopSchema.pre('deleteOne', async function (next) {
     try {
         if (this.status?.approvalCreateStatus === 'approved' && this.productInfo?.mainCategory) {
@@ -265,7 +278,7 @@ shopSchema.pre('deleteOne', async function (next) {
 });
 
 // Search index
-shopSchema.index({ name: 'text', description: 'text', tags: 'text', 'productInfo.mainCategory': 'text' });
+shopSchema.index({ name: 'text', description: 'text', hashtags: 'text', 'productInfo.mainCategory': 'text' });
 
 // Compound indexes
 shopSchema.index({ slug: 1 });

@@ -68,7 +68,7 @@ const CreatePostModal = ({ open, onOpenChange }) => {
             const end = textarea.selectionEnd;
             const newContent = content.substring(0, start) + emojiData.emoji + content.substring(end);
             setContent(newContent);
-            
+
             // Đặt lại cursor position
             setTimeout(() => {
                 textarea.selectionStart = textarea.selectionEnd = start + emojiData.emoji.length;
@@ -83,17 +83,18 @@ const CreatePostModal = ({ open, onOpenChange }) => {
         if (mediaList.length > 0) {
             return mediaList;
         }
-        
+
         // Nếu không có media nhưng có sản phẩm, lấy hình sản phẩm
         if (selectedProducts.length > 0) {
             return selectedProducts.map(product => ({
-                preview: product.image,
+                preview: product.images,
+                previewVideos: product.videos,
                 type: 'product',
                 productId: product.id,
                 productName: product.name
             }));
         }
-        
+
         return [];
     };
 
@@ -192,7 +193,7 @@ const CreatePostModal = ({ open, onOpenChange }) => {
                             >
                                 <Smile size={16} />
                             </Button>
-                            
+
                             {/* Emoji Picker */}
                             {showEmojiPicker && (
                                 <div className="absolute top-12 right-0 z-50">
@@ -221,8 +222,8 @@ const CreatePostModal = ({ open, onOpenChange }) => {
                                             variant="secondary"
                                             className="bg-white border border-blue-300 text-blue-700 px-2 py-1"
                                         >
-                                            <img 
-                                                src={product.image} 
+                                            <img
+                                                src={product.images[0]}
                                                 alt={product.name}
                                                 className="w-4 h-4 rounded mr-1"
                                             />
@@ -232,7 +233,7 @@ const CreatePostModal = ({ open, onOpenChange }) => {
                                                 size="sm"
                                                 className="ml-1 p-0 h-4 w-4"
                                                 onClick={() => {
-                                                    setSelectedProducts(prev => 
+                                                    setSelectedProducts(prev =>
                                                         prev.filter(p => p.id !== product.id)
                                                     );
                                                 }}
@@ -266,28 +267,57 @@ const CreatePostModal = ({ open, onOpenChange }) => {
                                         )}
 
                                         {media.type === 'image' ? (
-                                            <img 
-                                                src={media.preview} 
-                                                alt="preview" 
-                                                className="rounded-lg max-h-48 object-cover w-full" 
+                                            <img
+                                                src={media.preview}
+                                                alt="preview"
+                                                className="rounded-lg max-h-48 object-cover w-full"
                                             />
                                         ) : media.type === 'video' ? (
-                                            <video 
-                                                controls 
-                                                src={media.preview} 
-                                                className="rounded-lg max-h-48 w-full" 
+                                            <video
+                                                controls
+                                                src={media.preview}
+                                                className="rounded-lg max-h-48 w-full"
                                             />
                                         ) : (
-                                            <div className="relative">
-                                                <img 
-                                                    src={media.preview} 
-                                                    alt={media.productName} 
-                                                    className="rounded-lg max-h-48 object-cover w-full" 
-                                                />
-                                                <div className="absolute bottom-1 left-1 bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                                                    <ShoppingBag size={10} className="inline mr-1" />
-                                                    Sản phẩm
-                                                </div>
+                                            <div className="grid grid-cols-2 gap-2 mt-3"> {/* Tăng `gap` để rõ hơn */}
+                                                {/* Ảnh */}
+                                                {media.preview.map((imageUrl, index) => (
+                                                    <div
+                                                        key={`img-${index}`}
+                                                        className="relative flex-shrink-0" // Quan trọng: Ngăn co dãn
+                                                    >
+                                                        <img
+                                                            src={imageUrl}
+                                                            alt={`Product ${index + 1}`}
+                                                            className="rounded-lg w-48 h-48 object-cover" // Fixed width/height
+                                                        />
+                                                        <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded flex items-center">
+                                                            <ShoppingBag size={12} className="mr-1" />
+                                                            Sản phẩm
+                                                        </div>
+                                                    </div>
+                                                ))}
+
+                                                {/* Video */}
+                                                {media.previewVideos.map((videoUrl, index) => (
+                                                    <div
+                                                        key={`video-${index}`}
+                                                        className="relative flex-shrink-0" // Quan trọng
+                                                    >
+                                                        <video
+                                                            src={videoUrl}
+                                                            controls
+                                                            autoPlay
+                                                            muted
+                                                            loop
+                                                            className="rounded-lg w-48 h-48 object-cover"
+                                                        />
+                                                        <div className="absolute bottom-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded flex items-center">
+                                                            <ShoppingBag size={12} className="mr-1" />
+                                                            Sản phẩm
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
                                         )}
                                     </div>
@@ -317,21 +347,21 @@ const CreatePostModal = ({ open, onOpenChange }) => {
                         <div className="mt-4 border rounded-lg p-2 flex items-center justify-between text-gray-600 text-sm">
                             <span className="font-medium">Thêm vào bài viết của bạn</span>
                             <div className="flex gap-3">
-                                <button 
+                                <button
                                     type="button"
                                     onClick={() => document.querySelector('input[type="file"]').click()}
                                     className="hover:bg-gray-100 p-1 rounded"
                                 >
                                     <Image size={18} className="text-green-500" />
                                 </button>
-                                <button 
+                                <button
                                     type="button"
                                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
                                     className="hover:bg-gray-100 p-1 rounded"
                                 >
                                     <Smile size={18} className="text-yellow-500" />
                                 </button>
-                                <button 
+                                <button
                                     type="button"
                                     onClick={() => setShowProductModal(true)}
                                     className="hover:bg-gray-100 p-1 rounded"

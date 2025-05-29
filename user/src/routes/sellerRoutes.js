@@ -1,6 +1,6 @@
 import { Route } from 'react-router-dom';
 import DashboardLayout from '../pages/seller/DashboardLayout';
-import Orders from '../pages/seller/Orders';
+import Orders from '../pages/seller/Orders/Orders';
 import Customers from '../pages/seller/Customers';
 import StoreLayout from '.././pages/seller/Store/StoreLayout';
 import StoreInfo from '../pages/seller/Store/StoreInfo';
