@@ -1,0 +1,53 @@
+/* Custom styles cho Sonner toast */
+.sonner-toast {
+    border-radius: 8px !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Success toast với màu hồng */
+[data-sonner-toast][data-type="success"] {
+    background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%) !important;
+    border: 1px solid #f9a8d4 !important;
+    color: #be185d !important;
+}
+
+[data-sonner-toast][data-type="success"] [data-icon] {
+    color: #ec4899 !important;
+}
+
+/* Error toast */
+[data-sonner-toast][data-type="error"] {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%) !important;
+    border: 1px solid #fca5a5 !important;
+    color: #dc2626 !important;
+}
+
+[data-sonner-toast][data-type="error"] [data-icon] {
+    color: #ef4444 !important;
+}
+
+/* Info toast */
+[data-sonner-toast][data-type="info"] {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%) !important;
+    border: 1px solid #7dd3fc !important;
+    color: #0369a1 !important;
+}
+
+/* Dark mode support */
+.dark [data-sonner-toast] {
+    background: #18181b !important;
+    border: 1px solid #3f3f46 !important;
+    color: #f4f4f5 !important;
+}
+
+.dark [data-sonner-toast][data-type="success"] {
+    background: linear-gradient(135deg, #1f2937 0%, #374151 100%) !important;
+    border: 1px solid #ec4899 !important;
+    color: #f9a8d4 !important;
+}
+
+.dark [data-sonner-toast][data-type="error"] {
+    background: linear-gradient(135deg, #1f2937 0%, #374151 100%) !important;
+    border: 1px solid #ef4444 !important;
+    color: #fca5a5 !important;
+}

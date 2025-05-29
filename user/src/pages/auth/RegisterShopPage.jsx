@@ -121,8 +121,8 @@ const RegisterShopPage = () => {
       keywords: [],
     },
 
-    // Tags
-    tags: [],
+    // hashtags
+    hashtags: [],
   })
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -241,16 +241,16 @@ const RegisterShopPage = () => {
     }))
   }
 
-  // Handle tags and keywords
-  const handleTagsChange = (e) => {
+  // Handle hashtags and keywords
+  const handlehashtagsChange = (e) => {
     if (e.key === "Enter" && e.target.value.trim()) {
       e.preventDefault()
       const value = e.target.value.trim()
-      if (e.target.name === "tags") {
-        if (!formData.tags.includes(value)) {
+      if (e.target.name === "hashtags") {
+        if (!formData.hashtags.includes(value)) {
           setFormData({
             ...formData,
-            tags: [...formData.tags, value],
+            hashtags: [...formData.hashtags, value],
           })
         }
       } else if (e.target.name === "keywords") {
@@ -280,10 +280,10 @@ const RegisterShopPage = () => {
 
   // Remove tag
   const removeTag = (index, type) => {
-    if (type === "tags") {
-      const updatedTags = [...formData.tags]
-      updatedTags.splice(index, 1)
-      setFormData({ ...formData, tags: updatedTags })
+    if (type === "hashtags") {
+      const updatedhashtags = [...formData.hashtags]
+      updatedhashtags.splice(index, 1)
+      setFormData({ ...formData, hashtags: updatedhashtags })
     } else if (type === "keywords") {
       const updatedKeywords = [...formData.seo.keywords]
       updatedKeywords.splice(index, 1)
@@ -337,7 +337,7 @@ const RegisterShopPage = () => {
         if (!formData.productInfo.mainCategory) newErrors["productInfo.mainCategory"] = "Danh mục chính là bắt buộc"
         break
 
-      case 7: // SEO and Tags
+      case 7: // SEO and hashtags
         // Optional fields, no validation needed
         break
     }
@@ -1199,7 +1199,7 @@ const RegisterShopPage = () => {
                     id="brands"
                     name="brands"
                     placeholder="Nhập thương hiệu và nhấn Enter"
-                    onKeyDown={handleTagsChange}
+                    onKeyDown={handlehashtagsChange}
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">Nhập tên thương hiệu và nhấn Enter để thêm</p>
@@ -1286,16 +1286,16 @@ const RegisterShopPage = () => {
                     id="keywords"
                     name="keywords"
                     placeholder="Nhập từ khóa và nhấn Enter"
-                    onKeyDown={handleTagsChange}
+                    onKeyDown={handlehashtagsChange}
                   />
                 </div>
                 <p className="text-sm text-muted-foreground">Nhập từ khóa và nhấn Enter để thêm</p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="tags">Thẻ cửa hàng</Label>
+                <Label htmlFor="hashtags">Thẻ cửa hàng</Label>
                 <div className="flex flex-wrap gap-2 mb-2">
-                  {formData.tags.map((tag, index) => (
+                  {formData.hashtags.map((tag, index) => (
                     <div
                       key={index}
                       className="flex items-center bg-pink-100 text-pink-800 rounded-full px-3 py-1 text-sm"
@@ -1305,7 +1305,7 @@ const RegisterShopPage = () => {
                         variant="ghost"
                         size="icon"
                         className="h-5 w-5 ml-1 hover:bg-pink-200"
-                        onClick={() => removeTag(index, "tags")}
+                        onClick={() => removeTag(index, "hashtags")}
                       >
                         <X className="h-3 w-3" />
                       </Button>
@@ -1313,7 +1313,7 @@ const RegisterShopPage = () => {
                   ))}
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Input id="tags" name="tags" placeholder="Nhập thẻ và nhấn Enter" onKeyDown={handleTagsChange} />
+                  <Input id="hashtags" name="hashtags" placeholder="Nhập thẻ và nhấn Enter" onKeyDown={handlehashtagsChange} />
                 </div>
                 <p className="text-sm text-muted-foreground">Nhập thẻ và nhấn Enter để thêm</p>
               </div>

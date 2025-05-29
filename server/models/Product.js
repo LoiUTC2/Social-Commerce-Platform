@@ -26,12 +26,63 @@ const productSchema = new mongoose.Schema({
     brand: { type: String },
     condition: { type: String, enum: ['new', 'used'], default: 'new' },
     variants: [{ name: String, options: [String] }],
+
     ratings: { avg: { type: Number, default: 0 }, count: { type: Number, default: 0 } },
+    // Thống kê review
+    reviewStats: {
+        totalReviews: { type: Number, default: 0 },
+        verifiedReviews: { type: Number, default: 0 }, // review từ người đã mua
+        averageRating: { type: Number, default: 0 },
+
+        // Phân phối đánh giá theo sao
+        ratingDistribution: {
+            five: { type: Number, default: 0 },
+            four: { type: Number, default: 0 },
+            three: { type: Number, default: 0 },
+            two: { type: Number, default: 0 },
+            one: { type: Number, default: 0 },
+        },
+
+        // THÊM PHẦN TRĂM CHO TỪNG LOẠI ĐÁNH GIÁ
+        ratingPercentage: {
+            five: { type: Number, default: 0 },
+            four: { type: Number, default: 0 },
+            three: { type: Number, default: 0 },
+            two: { type: Number, default: 0 },
+            one: { type: Number, default: 0 }
+        },
+
+        // ĐIỂM CHẤT LƯỢNG TỔNG THỂ (0-100)
+        qualityScore: { type: Number, default: 0 },
+
+        // THỐNG KÊ TƯƠNG TÁC
+        totalLikes: { type: Number, default: 0 },
+        reviewsWithImages: { type: Number, default: 0 },
+        reviewsWithVideos: { type: Number, default: 0 },
+        reviewsWithMedia: { type: Number, default: 0 },
+
+        // THỜI GIAN CẬP NHẬT CUỐI
+        lastUpdated: { type: Date, default: Date.now },
+
+        // THÊM THỐNG KÊ THEO THỜI GIAN (tuỳ chọn)
+        recentRating: {
+            last30Days: {
+                average: { type: Number, default: 0 },
+                count: { type: Number, default: 0 }
+            },
+            last7Days: {
+                average: { type: Number, default: 0 },
+                count: { type: Number, default: 0 }
+            }
+        }
+    },
+
     soldCount: { type: Number, default: 0 }, //số lượng đã bán
+
     isActive: { type: Boolean, default: true }, // đang bán (true) và ngừng bán (false)
     allowPosts: { type: Boolean, default: true }, // Cho phép đăng bài viết kèm sản phẩm
-    posts: [{type: mongoose.Schema.Types.ObjectId, ref: 'Post'}], // Danh sách các bài viết liên quan đến sản phẩm (nếu cần)
-    tags: [String],
+    posts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }], // Danh sách các bài viết liên quan đến sản phẩm (nếu cần)
+    hashtags: [String],
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
@@ -345,8 +396,8 @@ productSchema.index({ 'categoryPath': 1 }); // Index cho categoryPath - giúp t�
 
 // Index tìm kiếm toàn văn
 productSchema.index(
-    { name: 'text', description: 'text', tags: 'text' },
-    { weights: { name: 3, tags: 2, description: 1 } } // Tìm kiếm theo name quan trọng nhất
+    { name: 'text', description: 'text', hashtags: 'text' },
+    { weights: { name: 3, hashtags: 2, description: 1 } } // Tìm kiếm theo name quan trọng nhất
 );
 
 // Index tổng hợp cho lọc và sắp xếp

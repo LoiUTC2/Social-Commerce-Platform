@@ -15,13 +15,29 @@ const userSchema = new mongoose.Schema({
   roles: { type: [String], enum: ['buyer', 'seller', 'admin'], default: ['buyer'] }, //danh sách role, phải được admin duyệt shop thì mới có quyền là seller
   role: { type: String, enum: ['buyer', 'seller', 'admin'], default: 'buyer' }, //role hiện tại của người dùng
   // isSellerActive: { type: Boolean, default: false }, // đã bật chế độ bán hàng chưa
-  shopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shop', unique: true}, // liên kết đến shop nếu là seller, khi đăng kí shop thì sẽ có shopId ngay
-  sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', unique: true}, // Liên kết với Seller (1-1)
+  shopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shop', unique: true }, // liên kết đến shop nếu là seller, khi đăng kí shop thì sẽ có shopId ngay
+  sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', unique: true }, // Liên kết với Seller (1-1)
   followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   savedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
   likedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
   likedComments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Comment' }],
+
+  // Thống kê review
+  reviewStats: {
+    // Là khách hàng
+    asCustomer: {
+      reviewsGiven: { type: Number, default: 0 }, // số review đã viết
+      avgRatingGiven: { type: Number, default: 0 }, // điểm trung bình đã cho
+      helpfulVotes: { type: Number, default: 0 } // số lượt hữu ích nhận được
+    },
+    // Được đánh giá bởi shop (khi là khách hàng)
+    fromShops: {
+      avgRating: { type: Number, default: 0 },
+      totalReviews: { type: Number, default: 0 }
+    }
+  },
+
   refreshToken: String,
   refreshTokenUsage: { type: Number, default: 0 }, //Kiểm soát giới hạn sử dụng refresh token
   ip: String, //Kiểm tra thiết bị đăng nhập
@@ -34,7 +50,7 @@ const userSchema = new mongoose.Schema({
 // Function to create slug from fullName
 function createSlug(text) {
   if (!text) return '';
-  
+
   return text
     .toLowerCase()
     .trim()
@@ -55,20 +71,20 @@ function createSlug(text) {
 async function generateUniqueSlug(baseSlug, userId = null) {
   let slug = baseSlug;
   let counter = 1;
-  
+
   while (true) {
     // Check if slug exists (excluding current user if updating)
     const query = { slug: slug };
     if (userId) {
       query._id = { $ne: userId };
     }
-    
+
     const existingUser = await mongoose.model('User').findOne(query);
-    
+
     if (!existingUser) {
       return slug;
     }
-    
+
     // If slug exists, append counter
     slug = `${baseSlug}-${counter}`;
     counter++;
@@ -76,17 +92,17 @@ async function generateUniqueSlug(baseSlug, userId = null) {
 }
 
 // Pre-save middleware to generate slug
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   try {
     // Only generate slug if fullName exists and (slug doesn't exist or fullName has changed)
     if (this.fullName && (!this.slug || this.isModified('fullName'))) {
       const baseSlug = createSlug(this.fullName);
-      
+
       if (baseSlug) {
         this.slug = await generateUniqueSlug(baseSlug, this._id);
       }
     }
-    
+
     next();
   } catch (error) {
     next(error);
@@ -94,22 +110,22 @@ userSchema.pre('save', async function(next) {
 });
 
 // Pre-update middleware for findOneAndUpdate
-userSchema.pre(['findOneAndUpdate', 'updateOne'], async function(next) {
+userSchema.pre(['findOneAndUpdate', 'updateOne'], async function (next) {
   try {
     const update = this.getUpdate();
-    
+
     // Check if fullName is being updated
     if (update.fullName || (update.$set && update.$set.fullName)) {
       const newFullName = update.fullName || update.$set.fullName;
-      
+
       if (newFullName) {
         const baseSlug = createSlug(newFullName);
-        
+
         if (baseSlug) {
           // Get the document being updated to exclude it from uniqueness check
           const docId = this.getQuery()._id;
           const uniqueSlug = await generateUniqueSlug(baseSlug, docId);
-          
+
           if (update.$set) {
             update.$set.slug = uniqueSlug;
           } else {
@@ -118,7 +134,7 @@ userSchema.pre(['findOneAndUpdate', 'updateOne'], async function(next) {
         }
       }
     }
-    
+
     next();
   } catch (error) {
     next(error);

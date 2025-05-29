@@ -16,6 +16,7 @@ const postSchema = new mongoose.Schema({
   videos: [String],
   productIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   hashtags: [String],
+  tags: [String],
   emotionTags: [String],
   categories: [String],
   location: String,

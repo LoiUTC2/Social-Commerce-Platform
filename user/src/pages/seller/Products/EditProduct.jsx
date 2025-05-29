@@ -37,6 +37,7 @@ const schema = yup.object().shape({
         .nullable()
         .transform((value) => (value === null || value === '' ? undefined : Number(value)))
         .min(0, 'Giảm giá phải là số không âm')
+        .max(100, 'Giảm giá tối đa 100%')
         .when('price', (price, schema) =>
             price && price > 0
                 ? schema.test(
@@ -49,7 +50,7 @@ const schema = yup.object().shape({
         .nullable(),
     brand: yup.string().nullable(),
     condition: yup.string().oneOf(['new', 'used'], 'Tình trạng không hợp lệ').required('Tình trạng là bắt buộc'),
-    tags: yup.string().nullable(),
+    hashtags: yup.string().nullable(),
     variants: yup.array().of(
         yup.object().shape({
             name: yup.string().trim().required('Tên biến thể là bắt buộc'),
@@ -81,7 +82,7 @@ export default function EditProduct() {
             category: '',
             brand: '',
             condition: 'new',
-            tags: '',
+            hashtags: '',
             variants: [],
             isActive: true,
         },
@@ -174,7 +175,7 @@ export default function EditProduct() {
                     category: product.mainCategory?._id || '',
                     brand: product.brand || '',
                     condition: product.condition,
-                    tags: product.tags?.join(', ') || '',
+                    hashtags: product.hashtags?.join(', ') || '',
                     variants: product.variants || [],
                     isActive: product.isActive,
                 });
@@ -343,7 +344,7 @@ export default function EditProduct() {
                 discount: data.discount || 0,
                 stock: data.stock || 0,
                 mainCategory: data.category,
-                tags: data.tags ? data.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
+                hashtags: data.hashtags ? data.hashtags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
                 images: imageUrls,
                 videos: videoUrls,
                 brand: data.brand,
@@ -481,11 +482,11 @@ export default function EditProduct() {
                                         name="discount"
                                         render={({ field }) => (
                                             <FormItem className="space-y-2">
-                                                <FormLabel>Giảm giá</FormLabel>
+                                                <FormLabel>Giảm giá (%)</FormLabel>
                                                 <FormControl>
                                                     <Input
                                                         type="number"
-                                                        placeholder="Nhập giảm giá (VNĐ)"
+                                                        placeholder="Nhập % giảm giá"
                                                         value={field.value ?? ''}
                                                         onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
                                                     />
@@ -661,13 +662,13 @@ export default function EditProduct() {
                                     />
                                 </div>
 
-                                {/* Tags */}
+                                {/* hashtags */}
                                 <FormField
                                     control={form.control}
-                                    name="tags"
+                                    name="hashtags"
                                     render={({ field }) => (
                                         <FormItem className="space-y-2">
-                                            <FormLabel>Thẻ (Tags)</FormLabel>
+                                            <FormLabel>Thẻ (hashtags)</FormLabel>
                                             <FormControl>
                                                 <Input placeholder="Nhập các thẻ, phân tách bằng dấu phẩy" {...field} />
                                             </FormControl>

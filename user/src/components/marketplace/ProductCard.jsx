@@ -15,7 +15,7 @@ export default function ProductCard({ product }) {
   if (!product) return null
 
   return (
-    <Link to={`/marketplace/products/${product._id || product.id}`}>
+    <Link to={`/marketplace/products/${product.slug}`}>
       <Card
         className="overflow-hidden transition-all duration-300 hover:shadow-lg border-0 bg-white rounded-xl"
         onMouseEnter={() => setIsHovered(true)}

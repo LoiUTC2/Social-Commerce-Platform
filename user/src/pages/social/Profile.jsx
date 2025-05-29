@@ -125,6 +125,7 @@ export default function Profile() {
   // Load profile data chỉ khi slug thay đổi
   useEffect(() => {
     if (slug) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
       // Reset tất cả state khi chuyển profile
       setProfileData(null)
       setProfileType(null)
@@ -139,6 +140,7 @@ export default function Profile() {
 
   // Load posts chỉ khi cần thiết và tránh gọi nhiều lần
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     if (profileData && activeTab === "posts" && !postsInitialized) {
       setPostsInitialized(true)
       setCurrentPage(1)
@@ -449,7 +451,7 @@ export default function Profile() {
           {/* Products Tab */}
           {profileType === 'shop' && (
             <TabsContent value="products">
-              <ProductsTab sellerId={profileData?.owner?._id || profileData?._id} />
+              <ProductsTab sellerId={profileData?._id || profileData?.owner?._id} />
             </TabsContent>
           )}
 

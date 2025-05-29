@@ -128,7 +128,7 @@ exports.createShop = async (req, res) => {
             operations,
             productInfo,
             seo,
-            tags
+            hashtags
         } = req.body;
 
         const newShop = new Shop({
@@ -144,7 +144,7 @@ exports.createShop = async (req, res) => {
             operations,
             productInfo,
             seo,
-            tags,
+            hashtags,
             status: {
                 isActive: true,
                 isApprovedCreate: false,
@@ -185,7 +185,7 @@ exports.updateShop = async (req, res) => {
             operations,
             productInfo,
             seo,
-            tags
+            hashtags
         } = req.body;
 
         // Cập nhật các thông tin khác
@@ -200,7 +200,7 @@ exports.updateShop = async (req, res) => {
         if (operations !== undefined) shop.operations = operations;
         if (productInfo !== undefined) shop.productInfo = productInfo;
         if (seo !== undefined) shop.seo = seo;
-        if (tags !== undefined) shop.tags = tags;
+        if (hashtags !== undefined) shop.hashtags = hashtags;
 
         shop.updatedAt = new Date();
 
@@ -459,7 +459,7 @@ exports.getShops = async (req, res) => {
             .sort(sortOption)
             .skip((page - 1) * limit)
             .limit(Number(limit))
-            .select('name slug avatar logo description stats tags status')
+            .select('name slug avatar logo description stats hashtags status')
             .populate('owner', 'fullName avatar');
 
         return successResponse(res, 'Lấy danh sách shop thành công', {
@@ -511,7 +511,7 @@ exports.getFollowedShops = async (req, res) => {
             .sort({ createdAt: -1 })
             .skip((page - 1) * limit)
             .limit(Number(limit))
-            .select('name slug avatar logo description stats tags status');
+            .select('name slug avatar logo description stats hashtags status');
 
         return successResponse(res, 'Lấy danh sách shop đã theo dõi thành công', {
             shops: followedShops,

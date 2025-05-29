@@ -209,7 +209,7 @@ export default function ProductDetail() {
                                 <p className="text-sm font-medium text-gray-500">Giảm giá</p>
                                 <p className="text-base">
                                     {typeof product.discount === 'number'
-                                        ? `${product.discount.toLocaleString('vi-VN')} VNĐ`
+                                        ? `${product.discount.toLocaleString('vi-VN')} %`
                                         : 'Không có'}
                                 </p>
                             </div>
@@ -252,10 +252,10 @@ export default function ProductDetail() {
                         </div>
 
                         <div>
-                            <p className="text-sm font-medium text-gray-500">Thẻ (Tags)</p>
+                            <p className="text-sm font-medium text-gray-500">Thẻ (hashtags)</p>
                             <div className="flex gap-2">
-                                {product.tags && product.tags.length > 0 ? (
-                                    product.tags.map((tag, index) => (
+                                {product.hashtags && product.hashtags.length > 0 ? (
+                                    product.hashtags.map((tag, index) => (
                                         <Badge key={index} variant="outline">{tag}</Badge>
                                     ))
                                 ) : (

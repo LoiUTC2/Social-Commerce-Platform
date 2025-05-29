@@ -3,9 +3,13 @@ import { Button } from "../../components/ui/button"
 import { Badge } from "../../components/ui/badge"
 import { Star, ShoppingCart, Eye, MapPin } from "lucide-react"
 import { useNavigate } from "react-router-dom"
+import { useState } from "react"
+import { toast } from "sonner"
+import { useCart } from "../../contexts/CartContext"
 
 export default function ProductCard({ product }) {
     const navigate = useNavigate()
+    const { buyNow, loading: cartLoading } = useCart()
 
     const {
         _id,
@@ -20,8 +24,10 @@ export default function ProductCard({ product }) {
         ratings = { avg: 0, count: 0 },
     } = product
 
-    const discountedPrice = discount > 0 ? price - discount : price
+    const discountedPrice = discount > 0 ? price - (price * discount) / 100 : price
     const hasDiscount = discount > 0
+
+    const [isBuyingNow, setIsBuyingNow] = useState(false)
 
     const formatPrice = (price) => {
         return new Intl.NumberFormat("vi-VN", {
@@ -35,10 +41,24 @@ export default function ProductCard({ product }) {
         navigate(`/marketplace/products/${slug || _id}`)
     }
 
-    const handleBuyNow = (e) => {
+    const handleBuyNow = async (e) => {
         e.stopPropagation()
-        navigate(`/marketplace/checkout?productId=${_id}`)
+
+        try {
+            setIsBuyingNow(true)
+            // Use buyNow function to add to cart and mark as "buy now"
+            await buyNow(_id, 1, {}) // ProductCard doesn't have variant selection, use default
+            // Navigate to cart page instead of checkout
+            navigate("/marketplace/cart")
+        } catch (error) {
+            console.error("Error buying now:", error)
+        } finally {
+            setIsBuyingNow(false)
+        }
     }
+
+    // Check loading state from CartContext or local state
+    const isLoading = cartLoading || isBuyingNow
 
     return (
         <Card className="overflow-hidden hover:shadow-md transition-shadow duration-200 border border-gray-200">
@@ -100,9 +120,15 @@ export default function ProductCard({ product }) {
                                     <Eye className="w-3 h-3 mr-1" />
                                     Xem
                                 </Button>
-                                <Button size="sm" className="h-7 px-2 text-xs" onClick={handleBuyNow} disabled={stock === 0}>
+
+                                <Button
+                                    size="sm"
+                                    className="h-7 px-2 text-xs bg-pink-500 hover:bg-pink-600"
+                                    onClick={handleBuyNow}
+                                    disabled={stock === 0 || isLoading}
+                                >
                                     <ShoppingCart className="w-3 h-3 mr-1" />
-                                    {stock === 0 ? "Hết hàng" : "Mua"}
+                                    {isLoading ? "Đang xử lý..." : stock === 0 ? "Hết hàng" : "Mua ngay"}
                                 </Button>
                             </div>
                         </div>

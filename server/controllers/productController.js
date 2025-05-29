@@ -102,7 +102,7 @@ exports.createProduct = async (req, res) => {
             brand: req.body.brand,
             condition: req.body.condition || 'new',
             variants: req.body.variants || [],
-            tags: req.body.tags || [],
+            hashhashtags: req.body.hashhashtags || [],
             isActive: true,
         };
 
@@ -383,7 +383,7 @@ exports.getFeaturedProductsForPosts = async (req, res) => {
 
     try {
         // Xây dựng query cơ bản
-        const query = { 
+        const query = {
             isActive: true,
             allowPosts: true
         };
@@ -393,7 +393,7 @@ exports.getFeaturedProductsForPosts = async (req, res) => {
             query.$or = [
                 { name: { $regex: search, $options: 'i' } },
                 { description: { $regex: search, $options: 'i' } },
-                { tags: { $regex: search, $options: 'i' } }
+                { hashhashtags: { $regex: search, $options: 'i' } }
             ];
         }
 
@@ -401,7 +401,7 @@ exports.getFeaturedProductsForPosts = async (req, res) => {
         const products = await Product.find(query)
             .populate('seller', 'shopName avatar') // Thông tin shop
             .populate('mainCategory', 'name slug') // Thông tin danh mục
-            .sort({ 
+            .sort({
                 soldCount: -1,       // Ưu tiên sản phẩm bán chạy
                 'ratings.avg': -1,   // Ưu tiên sản phẩm đánh giá cao
                 createdAt: -1        // Ưu tiên sản phẩm mới
@@ -475,7 +475,7 @@ exports.getSuggestedProducts = async (req, res) => {
         let total;
 
         if (userId) {
-            // Lấy các danh mục và tags từ sản phẩm mà user đã tương tác
+            // Lấy các danh mục và hashhashtags từ sản phẩm mà user đã tương tác
             const interactions = await UserInteraction.find({
                 userId,
                 targetType: 'product',
@@ -486,19 +486,19 @@ exports.getSuggestedProducts = async (req, res) => {
 
             const interactedProducts = await Product.find({ _id: { $in: productIds } });
 
-            const tagSet = new Set();
+            const hashtagset = new Set();
             const categorySet = new Set();
 
             interactedProducts.forEach(p => {
-                p.tags?.forEach(tag => tagSet.add(tag));
+                p.hashtags?.forEach(tag => hashtagset.add(tag));
                 p.categories?.forEach(cat => categorySet.add(cat.toString()));
             });
 
-            // Tìm các sản phẩm có cùng tags hoặc categories
+            // Tìm các sản phẩm có cùng hashtags hoặc categories
             products = await Product.find({
                 isActive: true,
                 $or: [
-                    { tags: { $in: Array.from(tagSet) } },
+                    { hashtags: { $in: Array.from(hashtagset) } },
                     { categories: { $in: Array.from(categorySet).map(id => mongoose.Types.ObjectId(id)) } }
                 ],
                 _id: { $nin: productIds } // Loại bỏ các sản phẩm đã tương tác
@@ -512,7 +512,7 @@ exports.getSuggestedProducts = async (req, res) => {
             total = await Product.countDocuments({
                 isActive: true,
                 $or: [
-                    { tags: { $in: Array.from(tagSet) } },
+                    { hashtags: { $in: Array.from(hashtagset) } },
                     { categories: { $in: Array.from(categorySet).map(id => mongoose.Types.ObjectId(id)) } }
                 ],
                 _id: { $nin: productIds }
@@ -643,13 +643,17 @@ exports.getProductDetailForUser = async (req, res) => {
     try {
         const { slug } = req.params;
         const userId = req.actor._id.toString();
+        const typeActor = req.actor.type === "shop" ? "Shop" : "User";
+
+        // Query params cho reviews
+        const { reviewPage = 1, reviewLimit = 5, sortBy = 'newest' } = req.query;
 
         // Lấy thông tin sản phẩm (chỉ sản phẩm đang bán)
         const product = await Product.findOne({
             slug: slug,
             isActive: true
         })
-            .populate('seller', 'name avatar slug')
+            .populate('seller', 'name avatar slug stats.rating.avg')
             .populate('mainCategory', 'name slug')
             .populate('categories', 'name slug');
 
@@ -667,11 +671,112 @@ exports.getProductDetailForUser = async (req, res) => {
             .sort({ 'ratings.avg': -1 })
             .limit(6);
 
+        // Xác định cách sắp xếp reviews
+        let reviewSort = {};
+        switch (sortBy) {
+            case 'oldest':
+                reviewSort = { createdAt: 1 };
+                break;
+            case 'rating_high':
+                reviewSort = { rating: -1, createdAt: -1 };
+                break;
+            case 'rating_low':
+                reviewSort = { rating: 1, createdAt: -1 };
+                break;
+            case 'most_liked':
+                reviewSort = { 'likes.length': -1, createdAt: -1 };
+                break;
+            default: // newest
+                reviewSort = { createdAt: -1 };
+        }
+
+        const reviewSkip = (parseInt(reviewPage) - 1) * parseInt(reviewLimit);
+
+        // Lấy danh sách reviews của sản phẩm với populate và phân trang
+        const [reviews, totalReviews] = await Promise.all([
+            ProductReview.find({
+                product: product._id,
+                status: 'active'
+            })
+                .populate({
+                    path: 'reviewer._id',
+                    select: 'fullName name avatar', // User sẽ có fullName, Shop sẽ có name
+                    refPath: 'reviewer.type'
+                })
+                .populate({
+                    path: 'order',
+                    select: 'createdAt items',
+                    populate: {
+                        path: 'items.product',
+                        select: 'name variants'
+                    }
+                })
+                .populate({
+                    path: 'replies',
+                    populate: {
+                        path: 'author._id',
+                        select: 'name avatar',
+                        refPath: 'author.type'
+                    }
+                })
+                .select('rating title content images videos likes isVerified createdAt reviewer order')
+                .sort(reviewSort)
+                .skip(reviewSkip)
+                .limit(parseInt(reviewLimit))
+                .lean(),
+
+            ProductReview.countDocuments({
+                product: product._id,
+                status: 'active'
+            })
+        ]);
+
+        // Tính toán thông tin phân trang reviews
+        const reviewPagination = {
+            currentPage: parseInt(reviewPage),
+            totalPages: Math.ceil(totalReviews / parseInt(reviewLimit)),
+            totalReviews,
+            hasNext: parseInt(reviewPage) < Math.ceil(totalReviews / parseInt(reviewLimit)),
+            hasPrev: parseInt(reviewPage) > 1
+        };
+
+        // Format review statistics
+        const ratingBreakdown = {
+            5: product.reviewStats?.ratingDistribution?.five || 0,
+            4: product.reviewStats?.ratingDistribution?.four || 0,
+            3: product.reviewStats?.ratingDistribution?.three || 0,
+            2: product.reviewStats?.ratingDistribution?.two || 0,
+            1: product.reviewStats?.ratingDistribution?.one || 0
+        };
+
+        // ✅ THÊM THÔNG TIN PHẦN TRĂM
+        const ratingPercentage = {
+            5: product.reviewStats?.ratingPercentage?.five || 0,
+            4: product.reviewStats?.ratingPercentage?.four || 0,
+            3: product.reviewStats?.ratingPercentage?.three || 0,
+            2: product.reviewStats?.ratingPercentage?.two || 0,
+            1: product.reviewStats?.ratingPercentage?.one || 0
+        };
+
+        // Thêm thông tin likes count cho mỗi review
+        const reviewsWithLikesCount = reviews.map(review => ({
+            ...review,
+            likesCount: review.likes ? review.likes.length : 0,
+            isLikedByUser: userId ? (review.likes || []).includes(userId) : false,
+            reviewerName: review.reviewer.type === 'User'
+                ? review.reviewer._id?.fullName
+                : review.reviewer._id?.name,
+            // Thêm thông tin variant đã mua (nếu có)
+            purchasedVariant: review.order?.items?.find(item =>
+                item.product._id.toString() === product._id.toString()
+            )?.selectedVariant
+        }));
+
         // Ghi lại hành vi xem sản phẩm nếu người dùng đã đăng nhập
         if (userId) {
             await UserInteraction.create({
                 author: {
-                    type: "Shop",
+                    type: typeActor,
                     _id: userId
                 },
                 targetType: 'product',
@@ -681,14 +786,37 @@ exports.getProductDetailForUser = async (req, res) => {
                     mainCategory: product.mainCategory,
                     categories: product.categories,
                     price: product.price,
-                    tags: product.tags
+                    hashtags: product.hashtags
                 }
             });
         }
 
         return successResponse(res, 'Lấy thông tin sản phẩm thành công', {
             product,
-            relatedProducts
+            relatedProducts,
+            reviews: {
+                data: reviewsWithLikesCount,
+                pagination: reviewPagination,
+                stats: {
+                    totalReviews: product.reviewStats?.totalReviews || 0,
+                    verifiedReviews: product.reviewStats?.verifiedReviews || 0,
+                    averageRating: product.reviewStats?.averageRating || product.ratings.avg || 0,
+
+                    // THÔNG TIN CHI TIẾT VỀ ĐÁNH GIÁ
+                    ratingBreakdown,
+                    ratingPercentage,
+
+                    // THÊM CÁC THÔNG TIN CHẤT LƯỢNG
+                    qualityScore: product.reviewStats?.qualityScore || 0,
+                    totalLikes: product.reviewStats?.totalLikes || 0,
+                    reviewsWithImages: product.reviewStats?.reviewsWithImages || 0,
+                    reviewsWithVideos: product.reviewStats?.reviewsWithVideos || 0,
+                    reviewsWithMedia: product.reviewStats?.reviewsWithMedia || 0,
+
+                    // THỜI GIAN CÂP NHẬT CUỐI
+                    lastUpdated: product.reviewStats?.lastUpdated
+                }
+            }
         });
     } catch (error) {
         return errorResponse(res, 'Lỗi khi lấy thông tin sản phẩm', 500, error.message);
@@ -846,7 +974,7 @@ exports.getProductBySlug = async (req, res) => {
                     mainCategory: product.mainCategory,
                     categories: product.categories,
                     price: product.price,
-                    tags: product.tags,
+                    hashtags: product.hashtags,
                     via: 'slug_search'
                 }
             });
