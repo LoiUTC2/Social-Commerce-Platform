@@ -1,4 +1,6 @@
 const express = require('express');
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
 const cors = require('cors');
 require('dotenv').config();
 const connectDB = require('./config/database'); 
@@ -6,13 +8,41 @@ const cookieParser = require('cookie-parser');
 
 const app = express();
 
+// Kết nối database trước khi khởi động server
+connectDB();
+
 // app.use(cors());
 app.use(cors({
   origin: 'http://localhost:3000', // địa chỉ frontend
   credentials: true, // QUAN TRỌNG để gửi cookie
 }));
-app.use(express.json());
+
+// Các middleware xử lý request
+app.use(express.json()); // Cho JSON data
+app.use(express.urlencoded({ extended: true })); // Cho form data
 app.use(cookieParser());
+
+// Cấu hình session
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: false,
+  saveUninitialized: true,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGO_URI,
+    collectionName: 'sessions'
+  }),
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000, // 24 giờ
+    secure: process.env.NODE_ENV === 'production', // Chỉ dùng secure trong production
+    sameSite: 'strict'
+  }
+}));
+
+// Middleware để gán sessionId cho req
+app.use((req, res, next) => {
+  req.sessionId = req.sessionID; // Lưu sessionId vào req để sử dụng
+  next();
+});
 
 const authRoutes = require('./routes/authRoutes');
 const interactionRoutes = require('./routes/interactionRoutes');
@@ -27,6 +57,7 @@ const cartRoutes = require('./routes/cartRoutes')
 const orderRoutes = require('./routes/orderRoutes')
 const productReviewRoutes = require('./routes/productReviewRoutes')
 const shopReviewRoutes = require('./routes/shopReviewRoutes')
+const hashtagsRoutes = require('./routes/hashtagsRouter')
 
 const shopManagerRoutes = require('./routes/shopManagerRoutes');
 const adminProductRoutes = require('./routes/adminProductRoutes');
@@ -45,6 +76,7 @@ app.use('/api/carts', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/product-reviews', productReviewRoutes);
 app.use('/api/shop-reviews', shopReviewRoutes);
+app.use('/api/hashtags', hashtagsRoutes);
 
 app.use('/api/admin/shops', shopManagerRoutes); //quản lí duyệt shop đăng kí
 app.use('/api/admin/products', adminProductRoutes); //quản lí sản phẩm nền tảng
@@ -56,9 +88,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/uploads', express.static('uploads')); // phục vụ file tĩnh
 
 
-// Gọi hàm kết nối MongoDB
-connectDB().then(() => {
-  app.listen(5000, () => {
-    console.log('🚀 Server started on port 5000');
-  });
+// Khởi động server
+app.listen(5000, () => {
+  console.log('🚀 Server started on port 5000');
 });

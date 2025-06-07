@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import LeftSidebar from "../../components/layout/LeftSidebar"
-import RightSidebar from "../../components/layout/RightSidebar"
+import LeftSidebar from "../../components/layout/leftSidebar/LeftSidebar"
+import RightSidebar from "../../components/layout/rightSidebar/RightSidebar"
 import { Button } from "../../components/ui/button"
 import { Card, CardContent } from "../../components/ui/card"
 import { Badge } from "../../components/ui/badge"
@@ -286,16 +286,16 @@ export default function PostDetailPage() {
       <div className="bg-gray-100 min-h-screen">
         <div className="px-4 max-w-[1600px] mx-auto pt-2">
           <div className="flex gap-6">
-            <aside className="w-[22%] hidden xl:block sticky top-[112px] h-fit self-start">
+            <aside className="w-[24%] hidden xl:block sticky top-[130px] h-fit self-start">
               <LeftSidebar />
             </aside>
-            <main className="flex-1">
+            <main className="flex-1 w-[22%]">
               <div className="animate-pulse space-y-4">
                 <div className="h-12 bg-gray-200 rounded"></div>
                 <div className="h-96 bg-gray-200 rounded"></div>
               </div>
             </main>
-            <aside className="w-[25%] hidden 2xl:block sticky top-[112px] h-fit self-start">
+            <aside className="w-[25%] hidden 2xl:block sticky top-[130px] h-fit self-start">
               <RightSidebar />
             </aside>
           </div>
@@ -309,10 +309,10 @@ export default function PostDetailPage() {
       <div className="bg-gray-100 min-h-screen">
         <div className="px-4 max-w-[1600px] mx-auto pt-2">
           <div className="flex gap-6">
-            <aside className="w-[22%] hidden xl:block sticky top-[112px] h-fit self-start">
+            <aside className="w-[24%] hidden xl:block sticky top-[130px] h-fit self-start">
               <LeftSidebar />
             </aside>
-            <main className="flex-1 flex items-center justify-center">
+            <main className="flex-1 flex items-center justify-center w-[22%]">
               <Card className="p-8 text-center">
                 <h2 className="text-xl font-semibold mb-2">Không tìm thấy bài viết</h2>
                 <p className="text-gray-600 mb-4">Bài viết có thể đã bị xóa hoặc bạn không có quyền xem.</p>
@@ -322,7 +322,7 @@ export default function PostDetailPage() {
                 </Button>
               </Card>
             </main>
-            <aside className="w-[25%] hidden 2xl:block sticky top-[112px] h-fit self-start">
+            <aside className="w-[25%] hidden 2xl:block sticky top-[130px] h-fit self-start">
               <RightSidebar />
             </aside>
           </div>
@@ -344,14 +344,14 @@ export default function PostDetailPage() {
       <div className="px-4 max-w-[1600px] mx-auto pt-2">
         <div className="flex gap-6">
           {/* Left Sidebar */}
-          <aside className="w-[22%] hidden xl:block sticky top-[112px] h-fit self-start">
+          <aside className="w-[24%] hidden xl:block sticky top-[80px] h-fit self-start">
             <LeftSidebar />
           </aside>
 
           {/* Main Content */}
-          <main className="flex-1 space-y-4">
+          <main className="flex-1 space-y-4 w-[22%]">
             {/* Back Button */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 sticky top-[80px] bg-pink-100 z-10 py-2 border-b border-gray-200 -mb-4">
               <Button variant="ghost" onClick={handleGoBack} className="flex items-center gap-2">
                 <ArrowLeft className="w-4 h-4" />
                 Quay lại
@@ -721,7 +721,7 @@ export default function PostDetailPage() {
           </main>
 
           {/* Right Sidebar */}
-          <aside className="w-[25%] hidden 2xl:block sticky top-[112px] h-fit self-start">
+          <aside className="w-[25%] hidden 2xl:block sticky top-[80px] h-fit self-start">
             <RightSidebar />
           </aside>
         </div>

@@ -6,6 +6,7 @@ const { successResponse, errorResponse } = require('../utils/response');
 const mongoose = require('mongoose');
 const slugify = require('slugify');
 const tokenService = require('../utils/tokenService');
+const Hashtag = require('../models/Hashtags');
 
 const sendTokenCookies = (res, accessToken, refreshToken) => {
     // Access Token
@@ -25,10 +26,34 @@ const sendTokenCookies = (res, accessToken, refreshToken) => {
     });
 };
 
+//Thêm hoặc sửa hashtags
+async function handleHashtagsUpdate(shopId, hashtags = [], createdById) {
+    for (const rawTag of hashtags) {
+        const tagName = rawTag.trim().toLowerCase();
+        if (!tagName) continue;
+
+        const hashtag = await Hashtag.findOneAndUpdate(
+            { name: tagName },
+            {
+                $setOnInsert: {
+                    name: tagName,
+                    createdBy: createdById,
+                    createdByModel: "User"
+                },
+                $addToSet: { shops: shopId },
+                $set: { lastUsedAt: new Date() },
+                $inc: { usageCount: 1 }
+            },
+            { upsert: true, new: true }
+        );
+    }
+}
+
 //Chuyển đổi tài khoản, seller hoặc buyer
 exports.switchUserRole = async (req, res) => {
     try {
         const userId = req.user.userId;
+        const sessionId = req.sessionId;
 
         const user = await User.findById(userId);
         if (!user) return errorResponse(res, 'Không tìm thấy người dùng', 404);
@@ -40,6 +65,14 @@ exports.switchUserRole = async (req, res) => {
             return errorResponse(res, `Bạn chưa có quyền chuyển sang ${targetRole}`, 403);
         }
 
+        // Cập nhật author trong UserInteraction
+        const authorType = targetRole === 'seller' && user.shopId ? 'Shop' : 'User';
+        const authorId = authorType === 'Shop' ? user.shopId : user._id;
+        await UserInteraction.updateMany(
+            { sessionId, author: { $exists: false } },
+            { $set: { author: { type: authorType, _id: authorId } } }
+        );
+
         // Tạo token mới với role mới
         const payload = { userId: user._id, role: targetRole };
         const newAccessToken = tokenService.generateAccessToken(payload);
@@ -48,13 +81,11 @@ exports.switchUserRole = async (req, res) => {
         // Cập nhật refresh token trong DB
         user.refreshToken = newRefreshToken;
         user.refreshTokenUsage = 0; // Reset usage count
+        user.role = targetRole;
         await user.save();
 
         // Gửi token mới qua cookies
         sendTokenCookies(res, newAccessToken, newRefreshToken);
-
-        user.role = targetRole;
-        await user.save();
 
         let actor = null;
         if (targetRole === 'seller' && user.shopId) {
@@ -159,6 +190,8 @@ exports.createShop = async (req, res) => {
         existingUser.shopId = savedShop._id;
         await existingUser.save();
 
+        await handleHashtagsUpdate(savedShop._id, req.body.hashtags, userId);
+
         return successResponse(res, 'Tạo shop thành công, vui lòng chờ admin duyệt', savedShop);
     } catch (error) {
         return errorResponse(res, 'Lỗi khi tạo shop', 500, error.message);
@@ -206,7 +239,19 @@ exports.updateShop = async (req, res) => {
 
         const updatedShop = await shop.save();
 
-        return successResponse(res, 'Cập nhật shop thành công', updatedShop);
+        // Populate thông tin danh mục sau khi lưu
+        const populatedShop = await Shop.findById(updatedShop._id)
+            .populate('owner', 'fullName avatar coverImage email phone')
+            .populate('seller')
+            .populate('productInfo.mainCategory', 'name slug description icon level')
+            .populate('productInfo.subCategories', 'name slug description icon level')
+            .populate('stats.followers', 'fullName avatar');
+
+        if (updatedShop.hashtags) {
+            await handleHashtagsUpdate(updatedShop._id, updatedShop.hashtags, sellerId);
+        }
+
+        return successResponse(res, 'Cập nhật shop thành công', populatedShop);
     } catch (error) {
         return errorResponse(res, 'Lỗi khi cập nhật shop', 500, error.message);
     }
@@ -320,16 +365,17 @@ exports.toggleFollowShop = async (req, res) => {
     }
 };
 
-// Lấy thông tin shop theo ID
-exports.getShopById = async (req, res) => {
-    const { shopId } = req.params;
-    const userId = req.user?.userId || null;
+// Lấy thông tin shop theo Slug
+exports.getShopBySlug = async (req, res) => {
+    const { slug } = req.params;
 
     try {
-        const shop = await Shop.findOne({
-            _id: shopId,
-            'status.isApprovedCreate': true
-        }).populate('owner', 'fullName avatar');
+        const shop = await Shop.findOne({ slug, 'status.isApprovedCreate': true })
+            .populate('owner', 'fullName avatar coverImage email phone')
+            .populate('seller')
+            .populate('productInfo.mainCategory', 'name')
+            .populate('productInfo.subCategories', 'name')
+            .populate('stats.followers', 'fullName avatar');
 
         if (!shop) {
             return errorResponse(res, 'Cửa hàng không tồn tại hoặc chưa được duyệt', 404);
@@ -338,40 +384,6 @@ exports.getShopById = async (req, res) => {
         // Tăng lượt xem cho shop
         shop.stats.views += 1;
         await shop.save();
-
-        // Ghi lại hành vi xem shop để AI học (nếu đã đăng nhập)
-        if (userId) {
-            await UserInteraction.create({
-                userId,
-                targetType: 'shop',
-                targetId: shop._id,
-                action: 'view',
-                metadata: { source: 'shop_detail' },
-                timestamp: new Date()
-            });
-        }
-
-        return successResponse(res, 'Lấy thông tin cửa hàng thành công', shop);
-    } catch (err) {
-        return errorResponse(res, 'Lỗi khi lấy thông tin cửa hàng', 500, err.message);
-    }
-};
-
-// Lấy thông tin shop theo Slug
-exports.getShopBySlug = async (req, res) => {
-    const { slug } = req.params;
-
-    try {
-        const shop = await Shop.findOne({ slug })
-            .populate('owner', 'fullName avatar coverImage email phone')
-            .populate('seller')
-            .populate('productInfo.mainCategory', 'name')
-            .populate('productInfo.subCategories', 'name')
-            .populate('stats.followers', 'fullName avatar');
-
-        if (!shop) {
-            return errorResponse(res, 'Không tìm thấy cửa hàng', 404);
-        }
 
         return successResponse(res, 'Lấy thông tin cửa hàng thành công', shop);
     } catch (err) {
@@ -385,12 +397,11 @@ exports.getMyShop = async (req, res) => {
 
     try {
         const shop = await Shop.findOne({ _id: sellerId })
-        .populate('owner', 'fullName avatar coverImage email phone')
+            .populate('owner', 'fullName avatar coverImage email phone')
             .populate('seller')
-            .populate('productInfo.mainCategory', 'name')
-            .populate('productInfo.subCategories', 'name')
+            .populate('productInfo.mainCategory', 'name slug description icon level')
+            .populate('productInfo.subCategories', 'name slug description icon level')
             .populate('stats.followers', 'fullName avatar');
-            
         if (!shop) {
             return errorResponse(res, 'Bạn chưa có shop', 404);
         }

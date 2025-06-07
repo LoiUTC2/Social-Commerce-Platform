@@ -3,6 +3,7 @@ const Product = require('../models/Product');
 const { successResponse, errorResponse } = require('../utils/response');
 const logUserInteraction = require('../utils/logUserInteraction');
 const UserInteraction = require('../models/UserInteraction');
+const { trackInteraction } = require('../middleware/interactionMiddleware');
 
 // Thêm helper function để chuẩn hóa selectedVariant
 const normalizeSelectedVariant = (variant) => {
@@ -137,15 +138,14 @@ exports.addToCart = async (req, res) => {
             itemsCount: activeItems.length
         };
 
-        await logUserInteraction(req.actor, {
+        // Ghi nhận hành vi add_to_cart
+        req.body = {
             targetType: 'product',
             targetId: productId,
-            action: 'save',
-            metadata: {
-                quantity,
-                selectedVariant
-            }
-        });
+            action: 'add_to_cart',
+            metadata: { quantity, selectedVariant: normalizedVariant }
+        };
+        await trackInteraction(req, res, () => { });
 
         return successResponse(res, 'Thêm vào giỏ hàng thành công', cartData);
     } catch (err) {
@@ -313,6 +313,15 @@ exports.updateCartItem = async (req, res) => {
             itemsCount: activeItems.length
         };
 
+        // Ghi nhận hành vi update_cart_item
+        req.body = {
+            targetType: 'product',
+            targetId: productId,
+            action: 'update_cart_item',
+            metadata: { quantity, selectedVariant: normalizedVariant }
+        };
+        await trackInteraction(req, res, () => { });
+
         return successResponse(res, 'Cập nhật giỏ hàng thành công', cartData);
     } catch (err) {
         return errorResponse(res, 'Lỗi khi cập nhật giỏ hàng', 500, err.message);
@@ -357,14 +366,6 @@ exports.removeCartItem = async (req, res) => {
         cart.updatedAt = new Date();
         await cart.save();
 
-        // Log hành vi xóa
-        await logUserInteraction(req.actor, {
-            targetType: 'product',
-            targetId: productId,
-            action: 'remove',
-            metadata: { selectedVariant: normalizedVariant }
-        });
-
         // Populate cart để trả về
         const populatedCart = await Cart.findById(cart._id)
             .populate({
@@ -406,6 +407,15 @@ exports.removeCartItem = async (req, res) => {
             totalPrice: Math.round(totalPrice),
             itemsCount: activeItems.length
         };
+
+        // Ghi nhận hành vi remove_cart_item
+        req.body = {
+            targetType: 'product',
+            targetId: productId,
+            action: 'remove_cart_item',
+            metadata: { selectedVariant: normalizedVariant }
+        };
+        await trackInteraction(req, res, () => { });
 
         return successResponse(res, 'Đã xóa sản phẩm khỏi giỏ hàng', cartData);
     } catch (err) {
@@ -466,17 +476,17 @@ exports.removeMultipleCartItems = async (req, res) => {
         cart.updatedAt = new Date();
         await cart.save();
 
-        // Log các sản phẩm đã xóa
         for (const removedItem of removedItems) {
-            await logUserInteraction(req.actor, {
+            // Ghi nhận hành vi remove_multiple_cart_items cho từng sản phẩm
+            req.body = {
                 targetType: 'product',
                 targetId: removedItem.product,
-                action: 'remove',
+                action: 'remove_multiple_cart_items',
                 metadata: {
-                    selectedVariant: removedItem.selectedVariant,
-                    quantity: removedItem.quantity
+                    selectedVariant: removedItem.selectedVariant || {}
                 }
-            });
+            };
+            await trackInteraction(req, res, () => { });
         }
 
         // Populate cart để trả về
@@ -553,17 +563,18 @@ exports.clearCart = async (req, res) => {
         cart.updatedAt = new Date();
         await cart.save();
 
-        // Log từng sản phẩm bị xóa
         for (const item of clearedItems) {
-            await logUserInteraction(req.actor, {
+            // Ghi nhận hành vi clear_cart cho từng sản phẩm
+            req.body = {
                 targetType: 'product',
-                targetId: item.product._id || item.product,
+                targetId: item.product._id,
                 action: 'clear_cart',
                 metadata: {
                     quantity: item.quantity,
-                    selectedVariant: item.selectedVariant
+                    selectedVariant: item.selectedVariant || {}
                 }
-            });
+            };
+            await trackInteraction(req, res, () => { });
         }
 
         return successResponse(res, `Đã xóa toàn bộ ${clearedCount} sản phẩm khỏi giỏ hàng`, {
@@ -641,6 +652,20 @@ exports.cleanCart = async (req, res) => {
         const message = removedCount > 0
             ? `Đã loại bỏ ${removedCount} sản phẩm không còn khả dụng`
             : 'Tất cả sản phẩm trong giỏ hàng đều khả dụng';
+
+        // Ghi nhận hành vi clean_cart cho từng sản phẩm bị xóa
+        const removedItems = cart.items.filter(item => !item.product?.isActive || !item.product?.seller?.status?.isActive);
+        for (const item of removedItems) {
+            req.body = {
+                targetType: 'product',
+                targetId: item.product._id,
+                action: 'clean_cart',
+                metadata: {
+                    reason: !item.product?.isActive ? 'product_inactive' : 'shop_inactive'
+                }
+            };
+            await trackInteraction(req, res, () => { });
+        }
 
         return successResponse(res, message, {
             removedCount,

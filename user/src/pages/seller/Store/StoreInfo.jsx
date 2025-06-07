@@ -7,15 +7,32 @@ import { Label } from "../../../components/ui/label"
 import { Textarea } from "../../../components/ui/textarea"
 import { Button } from "../../../components/ui/button"
 import { Switch } from "../../../components/ui/switch"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui/tabs"
-import { Loader2, Save, Store, Phone, Mail, MapPin, Facebook, Instagram, Youtube, Tag, Search, Package, AlertTriangle, } from "lucide-react"
+import {
+  Loader2,
+  Save,
+  Store,
+  Phone,
+  Mail,
+  MapPin,
+  Facebook,
+  Instagram,
+  Youtube,
+  Tag,
+  Search,
+  Package,
+  AlertTriangle,
+  ChevronRight,
+  X,
+} from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "../../../components/ui/alert"
 import { ImageUpload } from "../../../components/common/ImageUploadForSeller"
 import { getMyShop, updateShop } from "../../../services/shopService"
 import { getCategoryTree } from "../../../services/categoryService"
 import { Badge } from "../../../components/ui/badge"
 import { Separator } from "../../../components/ui/separator"
+import { Checkbox } from "../../../components/ui/checkbox"
+import { ScrollArea } from "../../../components/ui/scroll-area"
 
 const StoreInfo = () => {
   const [loading, setLoading] = useState(true)
@@ -73,15 +90,6 @@ const StoreInfo = () => {
   const [categories, setCategories] = useState([])
   const [loadingCategories, setLoadingCategories] = useState(true)
 
-  // Mock data cho categories - trong thực tế sẽ fetch từ API
-  // const categories = [
-  //   { _id: "cat1", name: "Thời trang" },
-  //   { _id: "cat2", name: "Điện tử" },
-  //   { _id: "cat3", name: "Gia dụng" },
-  //   { _id: "cat4", name: "Sách" },
-  //   { _id: "cat5", name: "Thể thao" },
-  // ]
-
   // Lấy thông tin shop khi component mount
   useEffect(() => {
     const fetchData = async () => {
@@ -92,22 +100,27 @@ const StoreInfo = () => {
         // Lấy dữ liệu shop
         const shopResponse = await getMyShop()
         if (shopResponse.success) {
+          const shopData = shopResponse.data;
           setShopData({
-            ...shopResponse.data,
+            ...shopData,
             // Đảm bảo các trường luôn có giá trị mặc định
-            productInfo: shopResponse.data.productInfo || {
-              mainCategory: "",
-              subCategories: [],
-              brands: [],
-              productRestrictions: [],
+            productInfo: {
+              mainCategory: shopData.productInfo?.mainCategory || "",
+              subCategories: shopData.productInfo?.subCategories || [],
+              brands: shopData.productInfo?.brands || [],
+              productRestrictions: shopData.productInfo?.productRestrictions || [],
             },
-            seo: shopResponse.data.seo || {
+            seo: shopData.seo || {
               metaTitle: "",
               metaDescription: "",
               keywords: [],
             },
-            hashtags: shopResponse.data.hashtags || [],
-          })
+            hashtags: shopData.hashtags || [],
+          });
+
+          // Log để debug
+          console.log('Main category:', shopData.productInfo?.mainCategory);
+          console.log('Sub categories:', shopData.productInfo?.subCategories);
         }
 
         // Lấy dữ liệu danh mục
@@ -160,11 +173,14 @@ const StoreInfo = () => {
 
   // Xử lý thay đổi danh mục chính
   const handleMainCategoryChange = (value) => {
+    // Tìm thông tin đầy đủ của danh mục được chọn
+    const selectedCategory = getCategoryById(value);
+
     setShopData((prev) => ({
       ...prev,
       productInfo: {
         ...prev.productInfo,
-        mainCategory: value,
+        mainCategory: selectedCategory || value, // Lưu object nếu tìm được, không thì lưu ID
       },
     }))
   }
@@ -236,11 +252,20 @@ const StoreInfo = () => {
     }))
   }
 
-  // Xử lý thêm/xóa hashtags
-  const handlehashtagsChange = (e) => {
+  // Xử lý thêm/xóa hashtags - CẢI THIỆN: Validation hashtag không dấu, không khoảng cách
+  const handleHashtagsChange = (e) => {
     if (e.key === "Enter") {
       e.preventDefault()
-      const value = e.target.value.trim()
+      let value = e.target.value.trim()
+
+      // Loại bỏ dấu và khoảng cách, chuyển thành hashtag hợp lệ
+      value = value
+        .toLowerCase()
+        .normalize("NFD") // Tách dấu khỏi ký tự
+        .replace(/[\u0300-\u036f]/g, "") // Loại bỏ dấu
+        .replace(/[^a-z0-9]/g, "") // Chỉ giữ lại chữ cái và số
+        .replace(/\s+/g, "") // Loại bỏ khoảng cách
+
       if (value && !shopData.hashtags.includes(value)) {
         setShopData((prev) => ({
           ...prev,
@@ -251,10 +276,10 @@ const StoreInfo = () => {
     }
   }
 
-  const removeTag = (tagToRemove) => {
+  const removeHashtag = (hashtagToRemove) => {
     setShopData((prev) => ({
       ...prev,
-      hashtags: prev.hashtags.filter((tag) => tag !== tagToRemove),
+      hashtags: prev.hashtags.filter((hashtag) => hashtag !== hashtagToRemove),
     }))
   }
 
@@ -281,52 +306,115 @@ const StoreInfo = () => {
     }
   }
 
-  // Xử lý thay đổi danh mục con
-  const handleSubCategoryChange = (selectedIds) => {
-    setShopData((prev) => ({
-      ...prev,
-      productInfo: {
-        ...prev.productInfo,
-        subCategories: selectedIds,
-      },
-    }))
+  // Xử lý thay đổi danh mục con - CẢI THIỆN: Cho phép chọn/bỏ chọn nhiều danh mục
+  const handleSubCategoryToggle = (categoryId) => {
+    setShopData((prev) => {
+      const currentSubCategories = prev.productInfo.subCategories || []
+
+      // Tìm xem danh mục đã được chọn chưa
+      const isSelected = currentSubCategories.some(cat => {
+        const catId = typeof cat === 'object' ? cat._id : cat;
+        return catId === categoryId;
+      });
+
+      let newSubCategories;
+      if (isSelected) {
+        // Bỏ chọn - loại bỏ danh mục
+        newSubCategories = currentSubCategories.filter(cat => {
+          const catId = typeof cat === 'object' ? cat._id : cat;
+          return catId !== categoryId;
+        });
+      } else {
+        // Chọn - thêm danh mục với thông tin đầy đủ
+        const selectedCategory = getCategoryById(categoryId);
+        newSubCategories = [...currentSubCategories, selectedCategory || categoryId];
+      }
+
+      return {
+        ...prev,
+        productInfo: {
+          ...prev.productInfo,
+          subCategories: newSubCategories,
+        },
+      }
+    })
   }
 
-  // Lấy tên danh mục từ ID
+  // Lấy tên danh mục từ ID 
   const getCategoryNameById = (categoryId) => {
-    const findCategory = (categories, id) => {
-      for (const category of categories) {
-        if (category._id === id) return category.name
-        if (category.children && category.children.length > 0) {
-          const found = findCategory(category.children, id)
-          if (found) return found
-        }
-      }
-      return "Danh mục không xác định"
+    // Xử lý trường hợp categoryId là object (đã populate)
+    if (typeof categoryId === 'object' && categoryId !== null) {
+      return categoryId.name || "Danh mục không xác định";
     }
 
-    return findCategory(categories, categoryId)
-  }
+    const categoryIdStr = typeof categoryId === 'string' ? categoryId : categoryId?.toString();
 
-  // Tạo options cho danh mục
-  const getCategoryOptions = (categoriesData, level = 0) => {
+    // Tìm trong cây categories (đây là điểm quan trọng)
+    const findCategoryInTree = (categories, id) => {
+      for (const category of categories) {
+        if (category._id === id) return category;
+        if (category.children && category.children.length > 0) {
+          const found = findCategoryInTree(category.children, id);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const category = findCategoryInTree(categories, categoryIdStr);
+    return category ? category.name : "Danh mục không xác định";
+  };
+
+  // Lấy thông tin đầy đủ của danh mục từ ID - CẢI THIỆN: Bao gồm cả level
+  const getCategoryById = (categoryId) => {
+    // Xử lý trường hợp categoryId là object (đã populate)
+    if (typeof categoryId === 'object' && categoryId !== null) {
+      return categoryId;
+    }
+
+    const categoryIdStr = typeof categoryId === 'string' ? categoryId : categoryId?.toString();
+
+    // Tìm trong cây categories
+    const findCategoryInTree = (categories, id) => {
+      for (const category of categories) {
+        if (category._id === id) return category;
+        if (category.children && category.children.length > 0) {
+          const found = findCategoryInTree(category.children, id);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    return findCategoryInTree(categories, categoryIdStr);
+  };
+
+  // Tạo danh sách phẳng tất cả danh mục - CẢI THIỆN: Hiển thị cấp độ rõ ràng
+  const getFlatCategoryList = (categoriesData, level = 1, prefix = "") => {
     if (!categoriesData) return []
 
-    let options = []
+    let flatList = []
 
     categoriesData.forEach((category) => {
-      options.push({
+      // Tạo prefix hiển thị cấp độ
+      const levelPrefix = "  ".repeat(level - 1) + (level > 1 ? "└ " : "")
+      const displayName = `${levelPrefix}${category.name} (Cấp ${level})`
+
+      flatList.push({
+        ...category,
+        displayName,
+        level,
         value: category._id,
-        label: "  ".repeat(level) + (level > 0 ? "└ " : "") + category.name,
-        disabled: level === 0, // Vô hiệu hóa danh mục cấp 1 (chỉ chọn từ cấp 2 trở xuống)
+        label: displayName,
       })
 
+      // Đệ quy cho danh mục con
       if (category.children && category.children.length > 0) {
-        options = [...options, ...getCategoryOptions(category.children, level + 1)]
+        flatList = [...flatList, ...getFlatCategoryList(category.children, level + 1, prefix + "  ")]
       }
     })
 
-    return options
+    return flatList
   }
 
   // Xử lý thêm/xóa product restrictions
@@ -355,6 +443,66 @@ const StoreInfo = () => {
         productRestrictions: prev.productInfo.productRestrictions.filter((r) => r !== restriction),
       },
     }))
+  }
+
+  // Component hiển thị danh mục theo cấp - CẢI THIỆN: Hiển thị cây danh mục rõ ràng
+  const CategoryTreeDisplay = ({ categories, selectedCategories = [], onToggle, title, allowMultiple = false }) => {
+    const renderCategory = (category, level = 1) => {
+      const isSelected = selectedCategories.includes(category._id)
+      const hasChildren = category.children && category.children.length > 0
+
+      return (
+        <div key={category._id} className="space-y-1">
+          <div className={`flex items-center space-x-2 p-2 rounded-md hover:bg-gray-50 ${level > 1 ? "ml-4" : ""}`}
+            onMouseDown={(e) => e.preventDefault()}>
+            
+              {allowMultiple ? (
+                <Checkbox
+                  id={`category-${category._id}`}
+                  checked={isSelected}
+                  onCheckedChange={() => onToggle(category._id)}
+                />
+              ) : (
+                <input
+                  type="radio"
+                  id={`category-${category._id}`}
+                  name="mainCategory"
+                  checked={isSelected}
+                  onChange={() => onToggle(category._id)}
+                  className="w-4 h-4"
+                />
+              )}
+            
+            <Label
+              htmlFor={`category-${category._id}`}
+              className={`flex-1 cursor-pointer ${level === 1 ? "font-semibold text-blue-700" : level === 2 ? "font-medium text-green-700" : "text-purple-700"}`}
+            >
+              <span className="flex items-center">
+                {level > 1 && <ChevronRight className="w-3 h-3 mr-1" />}
+                {category.name}
+                <Badge variant="outline" className="ml-2 text-xs">
+                  Cấp {level}
+                </Badge>
+              </span>
+            </Label>
+          </div>
+
+          {/* Hiển thị danh mục con */}
+          {hasChildren && (
+            <div className="space-y-1">{category.children.map((child) => renderCategory(child, level + 1))}</div>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-2">
+        <Label className="text-base font-medium">{title}</Label>
+        <ScrollArea className="h-64 border rounded-md p-3">
+          <div className="space-y-1">{categories.map((category) => renderCategory(category))}</div>
+        </ScrollArea>
+      </div>
+    )
   }
 
   if (loading) {
@@ -493,31 +641,36 @@ const StoreInfo = () => {
                   </div>
                 </div>
 
+                {/* CẢI THIỆN: Phần hashtags với validation mới */}
                 <div className="space-y-2 mt-4">
-                  <Label>hashtags cửa hàng</Label>
+                  <Label>Hashtags cửa hàng</Label>
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {shopData.hashtags?.map((tag, index) => (
+                    {shopData.hashtags?.map((hashtag, index) => (
                       <Badge key={index} variant="outline" className="flex items-center gap-1 px-2 py-1">
-                        <Tag className="h-3 w-3" />
-                        {tag}
+                        <Tag className="h-3 w-3" />#{hashtag}
                         <button
                           type="button"
-                          onClick={() => removeTag(tag)}
+                          onClick={() => removeHashtag(hashtag)}
                           className="ml-1 text-gray-500 hover:text-gray-700"
                         >
-                          ×
+                          <X className="h-3 w-3" />
                         </button>
                       </Badge>
                     ))}
                   </div>
-                  <Input placeholder="Nhập tag và nhấn Enter" onKeyPress={handlehashtagsChange} />
-                  <p className="text-xs text-gray-500">Nhấn Enter để thêm tag</p>
+                  <Input
+                    placeholder="Nhập hashtag (không dấu, không khoảng cách) và nhấn Enter"
+                    onKeyPress={handleHashtagsChange}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Ví dụ: hoatuoi, quanao, thethao. Hashtag sẽ tự động loại bỏ dấu và khoảng cách.
+                  </p>
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Tab Sản phẩm & Ngành hàng */}
+          {/* Tab Sản phẩm & Ngành hàng - CẢI THIỆN HOÀN TOÀN */}
           <TabsContent value="product">
             <Card>
               <CardHeader>
@@ -528,90 +681,128 @@ const StoreInfo = () => {
                 <CardDescription>Thiết lập danh mục và thông tin sản phẩm kinh doanh</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label htmlFor="mainCategory">
-                    Danh mục chính <span className="text-red-500">*</span>
-                  </Label>
-                  {loadingCategories ? (
-                    <div className="flex items-center space-x-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-                      <span className="text-sm text-gray-500">Đang tải danh mục...</span>
-                    </div>
-                  ) : (
-                    <Select value={shopData.productInfo?.mainCategory} onValueChange={handleMainCategoryChange}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Chọn danh mục chính" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[400px]">
-                        {categories.map((category) => (
-                          <SelectItem key={category._id} value={category._id}>
-                            {category.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <p className="text-xs text-gray-500">Danh mục chính sẽ quyết định vị trí hiển thị cửa hàng của bạn</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Danh mục sản phẩm kinh doanh</Label>
-                  {loadingCategories ? (
-                    <div className="flex items-center space-x-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
-                      <span className="text-sm text-gray-500">Đang tải danh mục...</span>
-                    </div>
-                  ) : (
-                    <>
-                      <Select
-                        onValueChange={(value) => {
-                          if (!shopData.productInfo.subCategories.includes(value)) {
-                            handleSubCategoryChange([...shopData.productInfo.subCategories, value])
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Chọn danh mục sản phẩm kinh doanh" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-[400px]">
-                          {getCategoryOptions(categories).map((option) => (
-                            <SelectItem
-                              key={option.value}
-                              value={option.value}
-                              disabled={option.disabled || shopData.productInfo.subCategories.includes(option.value)}
-                            >
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {shopData.productInfo?.subCategories?.map((categoryId) => (
-                          <Badge key={categoryId} variant="secondary" className="flex items-center gap-1 px-2 py-1">
-                            {getCategoryNameById(categoryId)}
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleSubCategoryChange(
-                                  shopData.productInfo.subCategories.filter((id) => id !== categoryId),
-                                )
-                              }
-                              className="ml-1 text-gray-500 hover:text-gray-700"
-                            >
-                              ×
-                            </button>
-                          </Badge>
-                        ))}
-                        {shopData.productInfo?.subCategories?.length === 0 && (
-                          <span className="text-sm text-gray-500 italic">Chưa chọn danh mục nào</span>
-                        )}
+                {loadingCategories ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-gray-500 mr-2" />
+                    <span className="text-sm text-gray-500">Đang tải danh mục...</span>
+                  </div>
+                ) : (
+                  <>
+                    {/* Danh mục chính - CẢI THIỆN: Hiển thị cây danh mục với radio button */}
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <Label className="text-base font-medium">
+                          Danh mục chính <span className="text-red-500">*</span>
+                        </Label>
+                        <Badge variant="secondary" className="text-xs">
+                          Chọn 1 danh mục
+                        </Badge>
                       </div>
+
+                      <CategoryTreeDisplay
+                        categories={categories}
+                        selectedCategories={
+                          shopData.productInfo?.mainCategory ? [
+                            typeof shopData.productInfo.mainCategory === 'object'
+                              ? shopData.productInfo.mainCategory._id
+                              : shopData.productInfo.mainCategory
+                          ] : []
+                        }
+                        onToggle={handleMainCategoryChange}
+                        title=""
+                        allowMultiple={false}
+                      />
+
+                      {/* Hiển thị danh mục chính đã chọn */}
+                      {shopData.productInfo?.mainCategory && (
+                        <div className="p-3 bg-blue-50 rounded-md border border-blue-200">
+                          <p className="text-sm font-medium text-blue-800">Danh mục chính đã chọn:</p>
+                          <div className="flex items-center mt-1">
+                            <Badge variant="default" className="bg-blue-600">
+                              {getCategoryNameById(shopData.productInfo.mainCategory)}
+                            </Badge>
+                            {(() => {
+                              const category = getCategoryById(shopData.productInfo.mainCategory);
+                              return category && category.level ? (
+                                <Badge variant="outline" className="ml-2">
+                                  Cấp {category.level}
+                                </Badge>
+                              ) : null;
+                            })()}
+                          </div>
+                        </div>
+                      )}
+
                       <p className="text-xs text-gray-500">
-                        Chọn các danh mục sản phẩm bạn sẽ kinh doanh trong cửa hàng
+                        Danh mục chính quyết định vị trí hiển thị cửa hàng. Bạn có thể chọn danh mục ở bất kỳ cấp nào.
                       </p>
-                    </>
-                  )}
-                </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Danh mục sản phẩm kinh doanh - CẢI THIỆN: Hiển thị cây danh mục với checkbox */}
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <Label className="text-base font-medium">Danh mục sản phẩm kinh doanh</Label>
+                        <Badge variant="secondary" className="text-xs">
+                          Chọn nhiều danh mục
+                        </Badge>
+                      </div>
+
+                      <CategoryTreeDisplay
+                        categories={categories}
+                        selectedCategories={
+                          shopData.productInfo?.subCategories?.map(cat =>
+                            typeof cat === 'object' ? cat._id : cat
+                          ) || []
+                        }
+                        onToggle={handleSubCategoryToggle}
+                        title=""
+                        allowMultiple={true}
+                      />
+
+                      {/* Hiển thị danh mục phụ đã chọn */}
+                      {shopData.productInfo?.subCategories?.length > 0 && (
+                        <div className="p-3 bg-green-50 rounded-md border border-green-200">
+                          <p className="text-sm font-medium text-green-800 mb-2">
+                            Danh mục sản phẩm đã chọn ({shopData.productInfo.subCategories.length}):
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {shopData.productInfo.subCategories.map((categoryId) => {
+                              const category = getCategoryById(categoryId)
+                              return (
+                                <div key={categoryId} className="flex items-center space-x-1">
+                                  <Badge variant="secondary" className="bg-green-600 text-white">
+                                    {getCategoryNameById(categoryId)}
+                                  </Badge>
+                                  {category && (
+                                    <Badge variant="outline" className="text-xs">
+                                      Cấp {category.level}
+                                    </Badge>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSubCategoryToggle(categoryId)}
+                                    className="ml-1 text-green-600 hover:text-green-800"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      <p className="text-xs text-gray-500">
+                        Chọn tất cả danh mục sản phẩm mà cửa hàng của bạn kinh doanh. Có thể chọn nhiều danh mục ở các
+                        cấp khác nhau.
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                <Separator />
 
                 <div className="space-y-2">
                   <Label>Thương hiệu kinh doanh</Label>
@@ -624,7 +815,7 @@ const StoreInfo = () => {
                           onClick={() => removeBrand(brand)}
                           className="ml-1 text-gray-500 hover:text-gray-700"
                         >
-                          ×
+                          <X className="h-3 w-3" />
                         </button>
                       </Badge>
                     ))}
@@ -651,7 +842,7 @@ const StoreInfo = () => {
                           onClick={() => removeProductRestriction(restriction)}
                           className="ml-1 text-red-600 hover:text-red-800"
                         >
-                          ×
+                          <X className="h-3 w-3" />
                         </button>
                       </Badge>
                     ))}
@@ -672,12 +863,19 @@ const StoreInfo = () => {
                   <div className="flex items-start">
                     <AlertTriangle className="h-5 w-5 text-amber-500 mr-2 mt-0.5" />
                     <div>
-                      <p className="font-medium">Lưu ý về sản phẩm:</p>
+                      <p className="font-medium">Hướng dẫn chọn danh mục:</p>
                       <ul className="text-sm text-gray-600 mt-1 space-y-1 list-disc list-inside">
-                        <li>Chọn danh mục chính phù hợp với sản phẩm bạn kinh doanh</li>
-                        <li>Thương hiệu giúp khách hàng dễ dàng tìm kiếm sản phẩm</li>
-                        <li>Đảm bảo thông tin sản phẩm tuân thủ quy định của nền tảng</li>
-                        <li>Hạn chế sản phẩm giúp bạn lưu ý về các mặt hàng không được phép kinh doanh</li>
+                        <li>
+                          <strong>Cấp 1:</strong> Danh mục tổng quát nhất (VD: Thời trang, Điện tử)
+                        </li>
+                        <li>
+                          <strong>Cấp 2:</strong> Danh mục chi tiết hơn (VD: Quần áo nam, Điện thoại)
+                        </li>
+                        <li>
+                          <strong>Cấp 3:</strong> Danh mục cụ thể nhất (VD: Áo sơ mi, iPhone)
+                        </li>
+                        <li>Danh mục chính nên chọn cấp phù hợp với quy mô kinh doanh</li>
+                        <li>Danh mục sản phẩm có thể chọn nhiều để mở rộng phạm vi kinh doanh</li>
                       </ul>
                     </div>
                   </div>
@@ -754,7 +952,7 @@ const StoreInfo = () => {
                           onClick={() => removeKeyword(keyword)}
                           className="ml-1 text-purple-500 hover:text-purple-700"
                         >
-                          ×
+                          <X className="h-3 w-3" />
                         </button>
                       </Badge>
                     ))}

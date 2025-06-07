@@ -61,7 +61,7 @@ export default function CommentSection({ postId, commentsCount = 0, onCommentsCo
             setHasMore(pageNum < pagination.totalPages)
         } catch (err) {
             console.error("Lỗi khi tải bình luận:", err)
-            toast.error("Không thể tải bình luận")
+            toast.error("Cần đăng nhập để xem bình luận")
         } finally {
             setLoading(false)
         }

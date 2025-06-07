@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import LeftSidebar from '../../components/layout/LeftSidebar';
-import RightSidebar from '../../components/layout/RightSidebar';
+import LeftSidebar from '../../components/layout/leftSidebar/LeftSidebar';
+import RightSidebar from '../../components/layout/rightSidebar/RightSidebar';
 import FeedItem from '../../components/feed/FeedItem';
 import { Button } from '../../components/ui/button';
 import StoryBar from '../../components/feed/StoryBar';
@@ -100,7 +100,7 @@ const FeedPage = ({ showTabs = false }) => {
     <div className="bg-gray-100 min-h-screen">
       {/* Tabs phụ dạng sticky nếu showTabs */}
       {showTabs && (
-        <div className="sticky top-[64px] z-40 bg-white border-b shadow-sm">
+        <div className="sticky top-[80px] z-40 bg-white border-b shadow-sm">
           <div className="flex justify-center space-x-4 px-4 py-2">
             <Button
               variant={tab === 'popular' ? 'default' : 'outline'}
@@ -134,12 +134,12 @@ const FeedPage = ({ showTabs = false }) => {
       <div className="px-4 max-w-[1600px] mx-auto pt-2">
         <div className="flex gap-6">
           {/* Left Sidebar */}
-          <aside className={`w-[22%] hidden xl:block sticky top-[112px] h-fit self-start`}>
+          <aside className={`w-[24%] hidden xl:block sticky top-[130px] h-fit self-start`}>
             <LeftSidebar />
           </aside>
 
           {/* Feed content */}
-          <main className="flex-1 space-y-4">
+          <main className="flex-1 space-y-4 w-[22%]">
             <CreatePost />
             <StoryBar />
 
@@ -156,7 +156,7 @@ const FeedPage = ({ showTabs = false }) => {
           </main>
 
           {/* Right Sidebar */}
-          <aside className={`w-[25%] hidden 2xl:block sticky top-[112px] h-fit self-start`}>
+          <aside className={`w-[25%] hidden 2xl:block sticky top-[130px] h-fit self-start`}>
             <RightSidebar />
           </aside>
         </div>

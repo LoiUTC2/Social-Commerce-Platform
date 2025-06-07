@@ -1,227 +1,287 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Button } from '../../../components/ui/button';
-import { Input } from '../../../components/ui/input';
-import { Textarea } from '../../../components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../../components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '../../../components/ui/form';
-import { Package, ArrowLeft, Upload, Plus, X } from 'lucide-react';
-import { toast } from 'sonner';
-import { createProduct } from '../../../services/productService';
-import { useForm, useFieldArray } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
-import { useAuth } from '../../../contexts/AuthContext';
-import { uploadToCloudinary } from '../../../utils/uploadToCloudinary';
-import { getCategoryTree } from '../../../services/categoryService';
-import CreateCategoryModal from '../../../components/common/CreateCategoryModal';
+"use client"
 
-// Schema validation với Yup
+import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
+import { Button } from "../../../components/ui/button"
+import { Input } from "../../../components/ui/input"
+import { Textarea } from "../../../components/ui/textarea"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../../components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../components/ui/select"
+import {
+    Form,
+    FormControl,
+    FormDescription,
+    FormField,
+    FormItem,
+    FormLabel,
+    FormMessage,
+} from "../../../components/ui/form"
+import { Switch } from "../../../components/ui/switch" // Thêm Switch component cho allowPosts
+import { Badge } from "../../../components/ui/badge" // Thêm Badge component cho hiển thị hashtags
+import { Package, ArrowLeft, Upload, Plus, X, Hash, Users } from "lucide-react"
+import { toast } from "sonner"
+import { createProduct } from "../../../services/productService"
+import { useForm, useFieldArray } from "react-hook-form"
+import { yupResolver } from "@hookform/resolvers/yup"
+import * as yup from "yup"
+import { useAuth } from "../../../contexts/AuthContext"
+import { uploadToCloudinary } from "../../../utils/uploadToCloudinary"
+import { getCategoryTree } from "../../../services/categoryService"
+import CreateCategoryModal from "../../../components/common/CreateCategoryModal"
+
+// Schema validation với Yup - thêm validation cho allowPosts
 const schema = yup.object().shape({
-    name: yup.string().trim().required('Tên sản phẩm là bắt buộc'),
-    description: yup.string().trim().required('Mô tả sản phẩm là bắt buộc'),
+    name: yup.string().trim().required("Tên sản phẩm là bắt buộc"),
+    description: yup.string().trim().required("Mô tả sản phẩm là bắt buộc"),
     price: yup
         .number()
         .nullable()
-        .transform((value) => (value === null || value === '' ? undefined : Number(value)))
-        .required('Giá sản phẩm là bắt buộc')
-        .positive('Giá phải là số dương'),
+        .transform((value) => (value === null || value === "" ? undefined : Number(value)))
+        .required("Giá sản phẩm là bắt buộc")
+        .positive("Giá phải là số dương"),
     stock: yup
         .number()
         .nullable()
-        .transform((value) => (value === null || value === '' ? undefined : Number(value)))
-        .required('Số lượng tồn kho là bắt buộc')
-        .min(0, 'Số lượng phải là số không âm'),
-    category: yup.string().required('Danh mục sản phẩm là bắt buộc'),
+        .transform((value) => (value === null || value === "" ? undefined : Number(value)))
+        .required("Số lượng tồn kho là bắt buộc")
+        .min(0, "Số lượng phải là số không âm"),
+    category: yup.string().required("Danh mục sản phẩm là bắt buộc"),
     discount: yup
         .number()
         .nullable()
-        .transform((value) => (value === null || value === '' ? undefined : Number(value)))
-        .min(0, 'Giảm giá phải là số không âm')
-        .max(100, 'Giảm giá tối đa 100%')
-        .when('price', (price, schema) =>
+        .transform((value) => (value === null || value === "" ? undefined : Number(value)))
+        .min(0, "Giảm giá phải là số không âm")
+        .max(100, "Giảm giá tối đa 100%")
+        .when("price", (price, schema) =>
             price && price > 0
                 ? schema.test(
-                    'discount-not-greater-than-price',
-                    'Giảm giá không được lớn hơn giá bán',
-                    (value) => value === undefined || value === null || value <= price
+                    "discount-not-greater-than-price",
+                    "Giảm giá không được lớn hơn giá bán",
+                    (value) => value === undefined || value === null || value <= price,
                 )
-                : schema
+                : schema,
         )
         .nullable(),
     brand: yup.string().nullable(),
-    condition: yup.string().oneOf(['new', 'used'], 'Tình trạng không hợp lệ').required('Tình trạng là bắt buộc'),
-    hashtags: yup.string().nullable(),
+    condition: yup.string().oneOf(["new", "used"], "Tình trạng không hợp lệ").required("Tình trạng là bắt buộc"),
+    allowPosts: yup.boolean(), // Thêm validation cho allowPosts
     variants: yup.array().of(
         yup.object().shape({
-            name: yup.string().trim().required('Tên biến thể là bắt buộc'),
-            options: yup.array().of(yup.string().trim().required('Giá trị không được để trống')),
-        })
+            name: yup.string().trim().required("Tên biến thể là bắt buộc"),
+            options: yup.array().of(yup.string().trim().required("Giá trị không được để trống")),
+        }),
     ),
-});
+})
+
+// Hàm xử lý hashtag - loại bỏ dấu, khoảng cách, chuyển thành chữ thường
+const processHashtag = (hashtag) => {
+    return hashtag
+        .toLowerCase() // Chuyển thành chữ thường
+        .normalize("NFD") // Chuẩn hóa Unicode
+        .replace(/[\u0300-\u036f]/g, "") // Loại bỏ dấu
+        .replace(/[^a-z0-9]/g, "") // Chỉ giữ lại chữ cái và số
+        .trim() // Loại bỏ khoảng trắng đầu cuối
+}
+
+// Hàm hiển thị hashtag đẹp cho người dùng
+const displayHashtag = (hashtag) => {
+    return `#${hashtag}`
+}
 
 export default function AddProduct() {
-    const { user } = useAuth();
-    const navigate = useNavigate();
+    const { user } = useAuth()
+    const navigate = useNavigate()
 
     // State cho danh mục
-    const [categories, setCategories] = useState([]);
-    const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-    const [isLoadingCategories, setIsLoadingCategories] = useState(false);
-    const [selectedLevel1, setSelectedLevel1] = useState('');
-    const [selectedLevel2, setSelectedLevel2] = useState('');
+    const [categories, setCategories] = useState([])
+    const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
+    const [isLoadingCategories, setIsLoadingCategories] = useState(false)
+    const [selectedLevel1, setSelectedLevel1] = useState("")
+    const [selectedLevel2, setSelectedLevel2] = useState("")
 
-    // Khởi tạo form với React Hook Form và Yup
+    // State cho hashtags - thêm state để quản lý hashtags
+    const [hashtagInput, setHashtagInput] = useState("")
+    const [processedHashtags, setProcessedHashtags] = useState([])
+
+    // Khởi tạo form với React Hook Form và Yup - thêm allowPosts vào defaultValues
     const form = useForm({
         defaultValues: {
-            name: '',
-            description: '',
+            name: "",
+            description: "",
             price: null,
             discount: null,
             stock: null,
-            category: '',
-            brand: '',
-            condition: 'new',
-            hashtags: '',
+            category: "",
+            brand: "",
+            condition: "new",
+            allowPosts: true, // Mặc định cho phép đăng bài viết kèm sản phẩm
             images: [],
             videos: [],
             variants: [],
             isActive: true,
         },
         resolver: yupResolver(schema),
-    });
+    })
 
     // Quản lý variants với useFieldArray
-    const { fields: variants, append, remove } = useFieldArray({
+    const {
+        fields: variants,
+        append,
+        remove,
+    } = useFieldArray({
         control: form.control,
-        name: 'variants',
-    });
+        name: "variants",
+    })
 
     // State cho xử lý upload ảnh
-    const [uploading, setUploading] = useState(false);
-    const [mediaFiles, setMediaFiles] = useState([]);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [uploading, setUploading] = useState(false)
+    const [mediaFiles, setMediaFiles] = useState([])
+    const [isSubmitting, setIsSubmitting] = useState(false)
 
     // Lấy danh mục từ API
     const fetchCategories = async () => {
-        setIsLoadingCategories(true);
+        setIsLoadingCategories(true)
         try {
-            const response = await getCategoryTree();
-            setCategories(response.data.tree || []);
-            console.log('Categories fetched:', response.data.tree);
+            const response = await getCategoryTree()
+            setCategories(response.data.tree || [])
+            console.log("Categories fetched:", response.data.tree)
         } catch (error) {
-            toast.error('Lỗi', { description: 'Không thể tải danh mục. Vui lòng thử lại.' });
-            console.error('Lỗi khi lấy danh mục:', error);
+            toast.error("Lỗi", { description: "Không thể tải danh mục. Vui lòng thử lại." })
+            console.error("Lỗi khi lấy danh mục:", error)
         } finally {
-            setIsLoadingCategories(false);
+            setIsLoadingCategories(false)
         }
-    };
+    }
 
     // Gọi API lấy danh mục khi component mount
     useEffect(() => {
-        fetchCategories();
+        fetchCategories()
         return () => {
-            mediaFiles.forEach((image) => URL.revokeObjectURL(image.preview));
-        };
-    }, [mediaFiles]);
+            mediaFiles.forEach((image) => URL.revokeObjectURL(image.preview))
+        }
+    }, [mediaFiles])
 
     // Xử lý khi danh mục cấp 1 thay đổi
     const handleLevel1Change = (name) => {
-        const category = categories.find(cat => cat.name === name);
-        setSelectedLevel1(name);
-        setSelectedLevel2('');
-        form.setValue('category', category?._id || '');
-        console.log('Selected Level 1:', { name, id: category?._id });
-    };
+        const category = categories.find((cat) => cat.name === name)
+        setSelectedLevel1(name)
+        setSelectedLevel2("")
+        form.setValue("category", category?._id || "")
+        console.log("Selected Level 1:", { name, id: category?._id })
+    }
 
     // Xử lý khi danh mục cấp 2 thay đổi
     const handleLevel2Change = (name) => {
         const category = name
-            ? categories.find(cat => cat.name === selectedLevel1)?.children.find(child => child.name === name)
-            : categories.find(cat => cat.name === selectedLevel1);
-        setSelectedLevel2(name);
-        form.setValue('category', category?._id || '');
-        console.log('Selected Level 2:', { name, id: category?._id });
-    };
+            ? categories.find((cat) => cat.name === selectedLevel1)?.children.find((child) => child.name === name)
+            : categories.find((cat) => cat.name === selectedLevel1)
+        setSelectedLevel2(name)
+        form.setValue("category", category?._id || "")
+        console.log("Selected Level 2:", { name, id: category?._id })
+    }
 
     // Xử lý khi danh mục cấp 3 thay đổi
     const handleLevel3Change = (name) => {
         const category = categories
-            .find(cat => cat.name === selectedLevel1)
-            ?.children.find(child => child.name === selectedLevel2)
-            ?.children.find(grandchild => grandchild.name === name);
-        form.setValue('category', category?._id || '');
-        console.log('Selected Level 3:', { name, id: category?._id });
-    };
+            .find((cat) => cat.name === selectedLevel1)
+            ?.children.find((child) => child.name === selectedLevel2)
+            ?.children.find((grandchild) => grandchild.name === name)
+        form.setValue("category", category?._id || "")
+        console.log("Selected Level 3:", { name, id: category?._id })
+    }
+
+    // Xử lý thêm hashtag - cải tiến xử lý hashtag
+    const handleAddHashtag = () => {
+        if (!hashtagInput.trim()) return
+
+        const processed = processHashtag(hashtagInput.trim())
+        if (processed && !processedHashtags.includes(processed)) {
+            setProcessedHashtags((prev) => [...prev, processed])
+        }
+        setHashtagInput("") // Reset input sau khi thêm
+    }
+
+    // Xử lý xóa hashtag
+    const handleRemoveHashtag = (hashtagToRemove) => {
+        setProcessedHashtags((prev) => prev.filter((tag) => tag !== hashtagToRemove))
+    }
+
+    // Xử lý khi nhấn Enter trong input hashtag
+    const handleHashtagKeyPress = (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault()
+            handleAddHashtag()
+        }
+    }
 
     // Xử lý upload ảnh
     const handleMediaChange = (e) => {
-        const files = Array.from(e.target.files);
+        const files = Array.from(e.target.files)
         const newMediaFiles = files.map((file) => ({
             id: Date.now() + Math.random().toString(36),
             file,
             preview: URL.createObjectURL(file),
-            type: file.type.startsWith('video') ? 'video' : 'image',
-        }));
-        setMediaFiles((prev) => [...prev, ...newMediaFiles]);
-    };
+            type: file.type.startsWith("video") ? "video" : "image",
+        }))
+        setMediaFiles((prev) => [...prev, ...newMediaFiles])
+    }
 
     // Xử lý xóa ảnh
     const removeMedia = (index) => {
-        const updatedMediaFiles = [...mediaFiles];
-        URL.revokeObjectURL(updatedMediaFiles[index].preview);
-        updatedMediaFiles.splice(index, 1);
-        setMediaFiles(updatedMediaFiles);
-    };
+        const updatedMediaFiles = [...mediaFiles]
+        URL.revokeObjectURL(updatedMediaFiles[index].preview)
+        updatedMediaFiles.splice(index, 1)
+        setMediaFiles(updatedMediaFiles)
+    }
 
     // Xử lý thêm option cho biến thể
     const addVariantOption = (variantIndex, option) => {
-        if (!option.trim()) return;
+        if (!option.trim()) return
 
-        const currentVariants = form.getValues('variants') || [];
-        const updatedVariants = [...currentVariants];
+        const currentVariants = form.getValues("variants") || []
+        const updatedVariants = [...currentVariants]
         if (!updatedVariants[variantIndex].options.includes(option)) {
-            updatedVariants[variantIndex].options = [...(updatedVariants[variantIndex].options || []), option];
-            form.setValue('variants', updatedVariants);
+            updatedVariants[variantIndex].options = [...(updatedVariants[variantIndex].options || []), option]
+            form.setValue("variants", updatedVariants)
         }
-    };
+    }
 
     // Xử lý xóa option của biến thể
     const removeVariantOption = (variantIndex, optionIndex) => {
-        const currentVariants = form.getValues('variants') || [];
-        const updatedVariants = [...currentVariants];
-        updatedVariants[variantIndex].options.splice(optionIndex, 1);
-        form.setValue('variants', updatedVariants);
-    };
+        const currentVariants = form.getValues("variants") || []
+        const updatedVariants = [...currentVariants]
+        updatedVariants[variantIndex].options.splice(optionIndex, 1)
+        form.setValue("variants", updatedVariants)
+    }
 
-    // Xử lý submit form
+    // Xử lý submit form - cập nhật để gửi allowPosts và hashtags đã xử lý
     const onSubmit = async (data) => {
-        setIsSubmitting(true);
+        setIsSubmitting(true)
 
         try {
-            console.log('Form data before submit:', data);
-            console.log('Category ID to be sent:', data.category);
+            console.log("Form data before submit:", data)
+            console.log("Category ID to be sent:", data.category)
+            console.log("Processed hashtags:", processedHashtags) // Log hashtags đã xử lý
 
             // Kiểm tra category ID hợp lệ
             if (!data.category) {
-                throw new Error('Danh mục sản phẩm không được để trống');
+                throw new Error("Danh mục sản phẩm không được để trống")
             }
 
-            const imageUrls = [];
-            const videoUrls = [];
+            const imageUrls = []
+            const videoUrls = []
 
             if (mediaFiles.length > 0) {
-                setUploading(true);
+                setUploading(true)
                 for (const media of mediaFiles) {
-                    const url = await uploadToCloudinary(media.file);
-                    if (media.type === 'image') imageUrls.push(url);
-                    else videoUrls.push(url);
+                    const url = await uploadToCloudinary(media.file)
+                    if (media.type === "image") imageUrls.push(url)
+                    else videoUrls.push(url)
                 }
-                setUploading(false);
+                setUploading(false)
             }
 
-            // Chuẩn bị dữ liệu sản phẩm
+            // Chuẩn bị dữ liệu sản phẩm - thêm allowPosts và hashtags đã xử lý
             const productData = {
                 name: data.name,
                 description: data.description,
@@ -235,36 +295,42 @@ export default function AddProduct() {
                 brand: data.brand,
                 condition: data.condition,
                 variants: data.variants,
-                hashtags: data.hashtags ? data.hashtags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
-            };
+                allowPosts: data.allowPosts, // Thêm trường allowPosts
+                hashtags: processedHashtags, // Gửi hashtags đã được xử lý
+            }
 
-            console.log('Product data to be sent:', productData);
+            console.log("Product data to be sent:", productData)
 
-            await createProduct(productData);
+            await createProduct(productData)
 
-            toast.success('Thành công', { description: 'Thêm sản phẩm mới thành công' });
+            toast.success("Thành công", { description: "Thêm sản phẩm mới thành công" })
 
-            navigate('/seller/products');
+            navigate("/seller/products")
         } catch (error) {
-            console.error('Lỗi khi thêm sản phẩm:', error);
-            if (error.message.includes('validation')) {
-                toast.error('Thất bại', { description: 'Vui lòng kiểm tra lại các trường nhập, đảm bảo giảm giá không lớn hơn giá bán.' });
+            console.error("Lỗi khi thêm sản phẩm:", error)
+            if (error.message.includes("validation")) {
+                toast.error("Thất bại", {
+                    description: "Vui lòng kiểm tra lại các trường nhập, đảm bảo giảm giá không lớn hơn giá bán.",
+                })
             } else {
-                toast.error('Thất bại', { description: `Thêm sản phẩm thất bại: ${error.response?.data?.message || error.message}` });
+                toast.error("Thất bại", {
+                    description: `Thêm sản phẩm thất bại: ${error.response?.data?.message || error.message}`,
+                })
             }
         } finally {
-            setIsSubmitting(false);
+            setIsSubmitting(false)
         }
-    };
+    }
 
     // Xử lý quay lại trang danh sách
     const handleGoBack = () => {
-        if (form.formState.isDirty || mediaFiles.length > 0) {
-            const confirmLeave = window.confirm('Bạn đã thay đổi dữ liệu. Bạn có chắc muốn thoát mà không lưu?');
-            if (!confirmLeave) return;
+        if (form.formState.isDirty || mediaFiles.length > 0 || processedHashtags.length > 0) {
+            // Thêm check hashtags
+            const confirmLeave = window.confirm("Bạn đã thay đổi dữ liệu. Bạn có chắc muốn thoát mà không lưu?")
+            if (!confirmLeave) return
         }
-        navigate('/seller/products');
-    };
+        navigate("/seller/products")
+    }
 
     return (
         <div className="container mx-auto py-1 space-y-6">
@@ -288,7 +354,7 @@ export default function AddProduct() {
                         className="bg-pink-500 hover:bg-pink-600 disabled:bg-pink-300 disabled:cursor-not-allowed"
                         disabled={isSubmitting || uploading}
                     >
-                        {isSubmitting || uploading ? 'Đang lưu...' : 'Lưu sản phẩm'}
+                        {isSubmitting || uploading ? "Đang lưu..." : "Lưu sản phẩm"}
                     </Button>
                 </div>
             </div>
@@ -317,9 +383,7 @@ export default function AddProduct() {
                                                 <Input placeholder="Nhập tên sản phẩm" {...field} />
                                             </FormControl>
                                             <FormMessage />
-                                            <FormDescription>
-                                                Tên sản phẩm sẽ hiển thị cho khách hàng trên trang sản phẩm
-                                            </FormDescription>
+                                            <FormDescription>Tên sản phẩm sẽ hiển thị cho khách hàng trên trang sản phẩm</FormDescription>
                                         </FormItem>
                                     )}
                                 />
@@ -355,8 +419,8 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập giá (VNĐ)"
-                                                        value={field.value || ''}
-                                                        onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
+                                                        value={field.value || ""}
+                                                        onChange={(e) => field.onChange(e.target.value === "" ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
                                                 <FormMessage />
@@ -374,8 +438,8 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập % giảm giá"
-                                                        value={field.value || ''}
-                                                        onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
+                                                        value={field.value || ""}
+                                                        onChange={(e) => field.onChange(e.target.value === "" ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
                                                 <FormMessage />
@@ -398,8 +462,8 @@ export default function AddProduct() {
                                                     <Input
                                                         type="number"
                                                         placeholder="Nhập số lượng"
-                                                        value={field.value || ''}
-                                                        onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
+                                                        value={field.value || ""}
+                                                        onChange={(e) => field.onChange(e.target.value === "" ? null : Number(e.target.value))}
                                                     />
                                                 </FormControl>
                                                 <FormMessage />
@@ -445,22 +509,15 @@ export default function AddProduct() {
                                                         ))}
                                                     </SelectContent>
                                                 </Select>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => setIsCategoryModalOpen(true)}
-                                                >
+                                                <Button type="button" variant="outline" size="sm" onClick={() => setIsCategoryModalOpen(true)}>
                                                     <Plus className="h-4 w-4 mr-1" /> Thêm danh mục
                                                 </Button>
                                             </div>
-                                            <FormDescription>
-                                                Chọn danh mục cấp 1 cho sản phẩm
-                                            </FormDescription>
+                                            <FormDescription>Chọn danh mục cấp 1 cho sản phẩm</FormDescription>
                                         </FormItem>
 
                                         {/* Select cho danh mục cấp 2 */}
-                                        {selectedLevel1 && categories.find(cat => cat.name === selectedLevel1)?.children?.length > 0 && (
+                                        {selectedLevel1 && categories.find((cat) => cat.name === selectedLevel1)?.children?.length > 0 && (
                                             <FormField
                                                 control={form.control}
                                                 name="category"
@@ -475,7 +532,7 @@ export default function AddProduct() {
                                                             </FormControl>
                                                             <SelectContent>
                                                                 {categories
-                                                                    .find(cat => cat.name === selectedLevel1)
+                                                                    .find((cat) => cat.name === selectedLevel1)
                                                                     ?.children.map((child) => (
                                                                         <SelectItem key={child._id} value={child.name}>
                                                                             {child.name}
@@ -483,9 +540,7 @@ export default function AddProduct() {
                                                                     ))}
                                                             </SelectContent>
                                                         </Select>
-                                                        <FormDescription>
-                                                            Chọn danh mục cấp 2 nếu có
-                                                        </FormDescription>
+                                                        <FormDescription>Chọn danh mục cấp 2 nếu có</FormDescription>
                                                         <FormMessage />
                                                     </FormItem>
                                                 )}
@@ -493,48 +548,49 @@ export default function AddProduct() {
                                         )}
 
                                         {/* Select cho danh mục cấp 3 */}
-                                        {selectedLevel2 && categories.find(cat => cat.name === selectedLevel1)?.children?.find(child => child.name === selectedLevel2)?.children?.length > 0 && (
-                                            <FormField
-                                                control={form.control}
-                                                name="category"
-                                                render={({ field }) => (
-                                                    <FormItem>
-                                                        <FormLabel>Danh mục cấp 3</FormLabel>
-                                                        <Select
-                                                            onValueChange={handleLevel3Change}
-                                                            value={
-                                                                field.value
-                                                                    ? categories
-                                                                        .find(cat => cat.name === selectedLevel1)
-                                                                        ?.children.find(child => child.name === selectedLevel2)
-                                                                        ?.children.find(grandchild => grandchild._id === field.value)?.name || ''
-                                                                    : ''
-                                                            }
-                                                        >
-                                                            <FormControl>
-                                                                <SelectTrigger>
-                                                                    <SelectValue placeholder="Chọn danh mục cấp 3" />
-                                                                </SelectTrigger>
-                                                            </FormControl>
-                                                            <SelectContent>
-                                                                {categories
-                                                                    .find(cat => cat.name === selectedLevel1)
-                                                                    ?.children.find(child => child.name === selectedLevel2)
-                                                                    ?.children.map((grandchild) => (
-                                                                        <SelectItem key={grandchild._id} value={grandchild.name}>
-                                                                            {grandchild.name}
-                                                                        </SelectItem>
-                                                                    ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                        <FormDescription>
-                                                            Chọn danh mục cấp 3 nếu có
-                                                        </FormDescription>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                )}
-                                            />
-                                        )}
+                                        {selectedLevel2 &&
+                                            categories
+                                                .find((cat) => cat.name === selectedLevel1)
+                                                ?.children?.find((child) => child.name === selectedLevel2)?.children?.length > 0 && (
+                                                <FormField
+                                                    control={form.control}
+                                                    name="category"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel>Danh mục cấp 3</FormLabel>
+                                                            <Select
+                                                                onValueChange={handleLevel3Change}
+                                                                value={
+                                                                    field.value
+                                                                        ? categories
+                                                                            .find((cat) => cat.name === selectedLevel1)
+                                                                            ?.children.find((child) => child.name === selectedLevel2)
+                                                                            ?.children.find((grandchild) => grandchild._id === field.value)?.name || ""
+                                                                        : ""
+                                                                }
+                                                            >
+                                                                <FormControl>
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Chọn danh mục cấp 3" />
+                                                                    </SelectTrigger>
+                                                                </FormControl>
+                                                                <SelectContent>
+                                                                    {categories
+                                                                        .find((cat) => cat.name === selectedLevel1)
+                                                                        ?.children.find((child) => child.name === selectedLevel2)
+                                                                        ?.children.map((grandchild) => (
+                                                                            <SelectItem key={grandchild._id} value={grandchild.name}>
+                                                                                {grandchild.name}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                            <FormDescription>Chọn danh mục cấp 3 nếu có</FormDescription>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                            )}
                                     </div>
 
                                     <FormField
@@ -560,20 +616,84 @@ export default function AddProduct() {
                                     />
                                 </div>
 
-                                {/* hashtags */}
+                                {/* Phần hashtags mới được thiết kế lại */}
+                                <div className="space-y-3">
+                                    <FormLabel className="flex items-center gap-2">
+                                        <Hash className="h-4 w-4" />
+                                        Thẻ (hashtags)
+                                    </FormLabel>
+
+                                    {/* Input để thêm hashtag */}
+                                    <div className="flex items-center gap-2">
+                                        <Input
+                                            placeholder="Nhập hashtag (ví dụ: điện thoại, smartphone)"
+                                            value={hashtagInput}
+                                            onChange={(e) => setHashtagInput(e.target.value)}
+                                            onKeyPress={handleHashtagKeyPress}
+                                            className="flex-1"
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleAddHashtag}
+                                            disabled={!hashtagInput.trim()}
+                                        >
+                                            <Plus className="h-4 w-4 mr-1" />
+                                            Thêm
+                                        </Button>
+                                    </div>
+
+                                    {/* Hiển thị hashtags đã được xử lý */}
+                                    {processedHashtags.length > 0 && (
+                                        <div className="space-y-2">
+                                            <p className="text-sm text-gray-600">Hashtags đã thêm:</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {processedHashtags.map((hashtag, index) => (
+                                                    <Badge
+                                                        key={index}
+                                                        variant="secondary"
+                                                        className="flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 hover:bg-blue-200"
+                                                    >
+                                                        {displayHashtag(hashtag)}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveHashtag(hashtag)}
+                                                            className="ml-1 text-blue-600 hover:text-blue-800"
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </Badge>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <FormDescription>
+                                        Hashtags sẽ được tự động xử lý: loại bỏ dấu, khoảng cách và chuyển thành chữ thường. Ví dụ: "Điện
+                                        Thoại Thông Minh" → "#dienthoaithongminh"
+                                    </FormDescription>
+                                </div>
+
+                                {/* Thêm trường allowPosts */}
                                 <FormField
                                     control={form.control}
-                                    name="hashtags"
+                                    name="allowPosts"
                                     render={({ field }) => (
-                                        <FormItem className="space-y-2">
-                                            <FormLabel>Thẻ (hashtags)</FormLabel>
+                                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                                            <div className="space-y-0.5">
+                                                <FormLabel className="flex items-center gap-2 text-base">
+                                                    <Users className="h-4 w-4" />
+                                                    Cho phép đăng bài viết kèm sản phẩm
+                                                </FormLabel>
+                                                <FormDescription>
+                                                    Cho phép người dùng khác tạo bài viết và gắn thẻ sản phẩm này. Điều này giúp tăng độ phổ biến
+                                                    và tiếp cận của sản phẩm.
+                                                </FormDescription>
+                                            </div>
                                             <FormControl>
-                                                <Input placeholder="Nhập các thẻ, phân tách bằng dấu phẩy" {...field} />
+                                                <Switch checked={field.value} onCheckedChange={field.onChange} />
                                             </FormControl>
-                                            <FormDescription>
-                                                Các thẻ giúp khách hàng tìm thấy sản phẩm của bạn dễ dàng hơn
-                                            </FormDescription>
-                                            <FormMessage />
                                         </FormItem>
                                     )}
                                 />
@@ -593,9 +713,9 @@ export default function AddProduct() {
                                     <div className="grid grid-cols-2 gap-2">
                                         {mediaFiles.map((media) => (
                                             <div key={media.id} className="relative group">
-                                                {media.type === 'image' ? (
+                                                {media.type === "image" ? (
                                                     <img
-                                                        src={media.preview}
+                                                        src={media.preview || "/placeholder.svg"}
                                                         alt={`Preview ${media.id}`}
                                                         className="h-24 w-full object-cover rounded-md border border-gray-200"
                                                     />
@@ -664,12 +784,7 @@ export default function AddProduct() {
                                                             </FormItem>
                                                         )}
                                                     />
-                                                    <Button
-                                                        type="button"
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => remove(variantIndex)}
-                                                    >
+                                                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(variantIndex)}>
                                                         <X className="h-4 w-4" />
                                                     </Button>
                                                 </div>
@@ -697,10 +812,10 @@ export default function AddProduct() {
                                                         placeholder="Thêm giá trị (ví dụ: Đỏ)"
                                                         className="flex-1"
                                                         onKeyPress={(e) => {
-                                                            if (e.key === 'Enter') {
-                                                                e.preventDefault();
-                                                                addVariantOption(variantIndex, e.target.value);
-                                                                e.target.value = '';
+                                                            if (e.key === "Enter") {
+                                                                e.preventDefault()
+                                                                addVariantOption(variantIndex, e.target.value)
+                                                                e.target.value = ""
                                                             }
                                                         }}
                                                     />
@@ -709,9 +824,9 @@ export default function AddProduct() {
                                                         variant="outline"
                                                         size="sm"
                                                         onClick={(e) => {
-                                                            const input = e.target.previousSibling;
-                                                            addVariantOption(variantIndex, input.value);
-                                                            input.value = '';
+                                                            const input = e.target.previousSibling
+                                                            addVariantOption(variantIndex, input.value)
+                                                            input.value = ""
                                                         }}
                                                     >
                                                         Thêm
@@ -725,7 +840,7 @@ export default function AddProduct() {
                                         type="button"
                                         variant="outline"
                                         className="w-full"
-                                        onClick={() => append({ name: '', options: [] })}
+                                        onClick={() => append({ name: "", options: [] })}
                                     >
                                         <Plus className="h-4 w-4 mr-2" /> Thêm biến thể mới
                                     </Button>
@@ -739,12 +854,8 @@ export default function AddProduct() {
                         <Button type="button" variant="outline" onClick={handleGoBack}>
                             Hủy
                         </Button>
-                        <Button
-                            type="submit"
-                            className="bg-pink-500 hover:bg-pink-600"
-                            disabled={isSubmitting || uploading}
-                        >
-                            {isSubmitting || uploading ? 'Đang lưu...' : 'Lưu sản phẩm'}
+                        <Button type="submit" className="bg-pink-500 hover:bg-pink-600" disabled={isSubmitting || uploading}>
+                            {isSubmitting || uploading ? "Đang lưu..." : "Lưu sản phẩm"}
                         </Button>
                     </div>
                 </form>
@@ -754,15 +865,16 @@ export default function AddProduct() {
                 open={isCategoryModalOpen}
                 onOpenChange={setIsCategoryModalOpen}
                 onCategoryCreated={() => {
-                    fetchCategories();
-                    setSelectedLevel2('');
-                    form.setValue('category', selectedLevel1
-                        ? categories.find(cat => cat.name === selectedLevel1)?._id || ''
-                        : '');
+                    fetchCategories()
+                    setSelectedLevel2("")
+                    form.setValue(
+                        "category",
+                        selectedLevel1 ? categories.find((cat) => cat.name === selectedLevel1)?._id || "" : "",
+                    )
                 }}
                 categories={categories}
                 user={user}
             />
         </div>
-    );
+    )
 }
