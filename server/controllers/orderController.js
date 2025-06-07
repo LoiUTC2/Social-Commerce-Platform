@@ -5,6 +5,16 @@ const Shop = require('../models/Shop');
 const { removeOrderedItemsFromCart } = require('../utils/cartUtils');
 const logUserInteraction = require('../utils/logUserInteraction');
 const { successResponse, errorResponse } = require('../utils/response');
+const { trackInteraction } = require('../middleware/interactionMiddleware');
+
+// Thêm helper function để chuẩn hóa selectedVariant
+const normalizeSelectedVariant = (variant) => {
+    // Chuyển null, undefined, hoặc object rỗng thành {}
+    if (!variant || Object.keys(variant).length === 0) {
+        return {};
+    }
+    return variant;
+};
 
 exports.checkoutOrder = async (req, res) => {
     try {
@@ -98,20 +108,6 @@ exports.checkoutOrder = async (req, res) => {
                 productId: product._id.toString(),
                 selectedVariant: item.selectedVariant
             });
-
-            // Lưu hành vi "purchase" nếu actor là User
-            if (actorType === 'User') {
-                await logUserInteraction(req.actor, {
-                    targetType: 'product',
-                    targetId: product._id,
-                    action: 'purchase',
-                    metadata: {
-                        quantity: item.quantity,
-                        selectedVariant: item.selectedVariant,
-                        price: finalPrice
-                    }
-                });
-            }
         }
 
         if (orderedItems.length === 0) {
@@ -165,6 +161,19 @@ exports.checkoutOrder = async (req, res) => {
                         soldCount: item.quantity
                     }
                 });
+
+                // Ghi nhận hành vi purchase cho từng sản phẩm
+                req.body = {
+                    targetType: 'product',
+                    targetId: item.product,
+                    action: 'purchase',
+                    metadata: {
+                        quantity: item.quantity,
+                        selectedVariant: normalizeSelectedVariant(item.selectedVariant),
+                        price: item.price
+                    }
+                };
+                await trackInteraction(req, res, () => { });
             }
         }
 
@@ -180,7 +189,6 @@ exports.checkoutOrder = async (req, res) => {
         return errorResponse(res, 'Lỗi khi đặt hàng', 500, err.message);
     }
 };
-
 exports.createDirectOrder = async (req, res) => {
     try {
         const { _id: actorId } = req.actor;
@@ -255,20 +263,19 @@ exports.createDirectOrder = async (req, res) => {
         product.soldCount += quantity;
         await product.save();
 
-        // Ghi hành vi "purchase" nếu là người dùng
-        if (actorType === 'User') {
-            await logUserInteraction(req.actor, {
-                targetType: 'product',
-                targetId: productId,
-                action: 'purchase',
-                metadata: {
-                    quantity,
-                    selectedVariant,
-                    direct: true,
-                    price: finalPrice
-                }
-            });
-        }
+        // Ghi nhận hành vi purchase
+        req.body = {
+            targetType: 'product',
+            targetId: productId,
+            action: 'purchase',
+            metadata: {
+                quantity,
+                selectedVariant: normalizeSelectedVariant(selectedVariant),
+                direct: true,
+                price: finalPrice
+            }
+        };
+        await trackInteraction(req, res, () => { });
 
         // Populate order trước khi trả về
         const populatedOrder = await Order.findById(order._id)
@@ -869,7 +876,7 @@ exports.confirmOrderReceived = async (req, res) => {
         const order = await Order.findById(orderId)
             .populate('items.product', 'name slug seller')
             .populate('shop', 'name slug');
-        
+
         if (!order) {
             return errorResponse(res, 'Không tìm thấy đơn hàng', 404);
         }
@@ -883,7 +890,7 @@ exports.confirmOrderReceived = async (req, res) => {
         order.status = 'delivered';
         order.deliveredAt = new Date();
         order.updatedAt = new Date();
-        
+
         await order.save();
 
         // Populate order sau khi cập nhật

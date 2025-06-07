@@ -9,7 +9,7 @@ export default function HomePage() {
   return (
     <div className="bg-gray-100 min-h-screen">
       {/* Sticky tab dưới header tổng */}
-      <div className="sticky top-[64px] z-40 bg-white border-b shadow-sm">
+      <div className="sticky top-[80px] z-40 bg-white border-b shadow-sm">
         <div className="flex justify-center space-x-4 px-4 py-2">
           <Button
             variant={activeTab === 'feed' ? 'default' : 'outline'}

@@ -54,12 +54,6 @@ export const getFollowedShops = async (page = 1, limit = 10) => {
     return res.data;
 };
 
-// Lấy thông tin shop theo ID
-export const getShopById = async (shopId) => {
-    const res = await api.get(`/shops/${shopId}`);
-    return res.data;
-};
-
 // Lấy danh sách shop với phân trang và bộ lọc
 export const getShops = async (params = {}) => {
     const {

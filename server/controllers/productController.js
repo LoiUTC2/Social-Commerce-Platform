@@ -5,7 +5,9 @@ const slugify = require("slugify");
 const mongoose = require('mongoose');
 const Category = require('../models/Category');
 const Post = require('../models/Post');
-
+const ProductReviews = require('../models/ProductReviews');
+const Hashtag = require('../models/Hashtags');
+const geoip = require('geoip-lite');
 
 //Tạo slug khác biệt
 const generateUniqueSlug = async (name) => {
@@ -45,10 +47,37 @@ const generateSKU = async (name, sellerId) => {
     return sku;
 };
 
+//Thêm hoặc sửa hashtags
+async function handleHashtagsUpdate(productId, hashtags = [], createdById) {
+    for (const rawTag of hashtags) {
+        const tagName = rawTag.trim().toLowerCase();
+        if (!tagName) continue;
+
+        const hashtag = await Hashtag.findOneAndUpdate(
+            { name: tagName },
+            {
+                $setOnInsert: {
+                    name: tagName,
+                    createdBy: createdById,
+                    createdByModel: 'Shop'
+                },
+                $addToSet: { products: productId },
+                $set: { lastUsedAt: new Date() },
+                $inc: { usageCount: 1 }
+            },
+            { upsert: true, new: true }
+        );
+    }
+}
+
 // Tạo sản phẩm mới
 exports.createProduct = async (req, res) => {
     try {
         const sellerId = req.actor._id.toString(); //này là 1 shopId nhé, có middle ware check hết rồi nên bây giờ chắc chắn là seller(dùng shopId), còn model seller chỉ là thông tin bổ trợ cho shop thôi
+
+        const sessionId = req.sessionId;
+        const ip = req.ip;
+        const userAgent = req.headers['user-agent'];
 
         const slug = await generateUniqueSlug(req.body.name);
         const sku = await generateSKU(req.body.name, sellerId);
@@ -102,27 +131,38 @@ exports.createProduct = async (req, res) => {
             brand: req.body.brand,
             condition: req.body.condition || 'new',
             variants: req.body.variants || [],
-            hashhashtags: req.body.hashhashtags || [],
+            allowPosts: req.body.allowPosts,
+            hashtags: req.body.hashtags || [],
             isActive: true,
         };
 
         const product = await Product.create(productData);
 
+        await handleHashtagsUpdate(product._id, req.body.hashtags, sellerId);
+
         // Ghi lại hành vi tạo sản phẩm để phân tích sau này
-        await UserInteraction.create({
-            author: {
-                type: "Shop",
-                _id: sellerId
-            },
-            targetType: 'product',
-            targetId: product._id,
-            action: 'create',
-            metadata: {
-                price: product.price,
-                category: product.mainCategory,
-                brand: product.brand
-            }
-        });
+        // await UserInteraction.create({
+        //     author: {
+        //         type: "Shop",
+        //         _id: sellerId
+        //     },
+        //     targetType: 'product',
+        //     targetId: product._id,
+        //     action: 'create',
+        //     sessionId,
+        //     deviceInfo: {
+        //         userAgent,
+        //         ip,
+        //         platform: req.headers['sec-ch-ua-platform'] || 'unknown',
+        //         browser: req.headers['user-agent'].match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown'
+        //     },
+        //     location: geoip.lookup(ip) || {},
+        //     metadata: {
+        //         price: product.price,
+        //         category: product.mainCategory,
+        //         brand: product.brand
+        //     }
+        // });
 
         return successResponse(res, 'Thêm sản phẩm thành công', product, 201);
 
@@ -152,6 +192,9 @@ exports.updateProduct = async (req, res) => {
     try {
         const { slug } = req.params;
         const userId = req.actor._id.toString(); //người dùng lúc này là tài khoản seller nhé (dùng ShopId)
+        const sessionId = req.sessionId;
+        const ip = req.ip;
+        const userAgent = req.headers['user-agent'];
 
         // Tìm sản phẩm hiện tại để kiểm tra
         const currentProduct = await Product.findOne({ slug, seller: userId });
@@ -205,21 +248,33 @@ exports.updateProduct = async (req, res) => {
             { new: true, runValidators: true }
         );
 
+        if (updateData.hashtags) {
+            await handleHashtagsUpdate(updatedProduct._id, updateData.hashtags, userId);
+        }
+
         if (!updatedProduct) {
             return errorResponse(res, 'Không thể cập nhật sản phẩm', 500);
         }
 
         // Ghi lại hành vi cập nhật sản phẩm
-        await UserInteraction.create({
-            author: {
-                type: "Shop",
-                _id: userId
-            },
-            targetType: 'product',
-            targetId: updatedProduct._id,
-            action: 'update',
-            metadata: updateData
-        });
+        // await UserInteraction.create({
+        //     author: {
+        //         type: "Shop",
+        //         _id: userId
+        //     },
+        //     targetType: 'product',
+        //     targetId: updatedProduct._id,
+        //     action: 'update',
+        //     sessionId,
+        //     deviceInfo: {
+        //         userAgent,
+        //         ip,
+        //         platform: req.headers['sec-ch-ua-platform'] || 'unknown',
+        //         browser: req.headers['user-agent'].match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown'
+        //     },
+        //     location: geoip.lookup(ip) || {},
+        //     metadata: updateData
+        // });
 
         return successResponse(res, 'Cập nhật sản phẩm thành công', updatedProduct);
     } catch (error) {
@@ -249,6 +304,10 @@ exports.deleteProduct = async (req, res) => {
         const { productId } = req.params;
         const userId = req.actor._id.toString();
 
+        const sessionId = req.sessionId;
+        const ip = req.ip;
+        const userAgent = req.headers['user-agent'];
+
         const product = await Product.findOne({
             _id: productId,
             seller: userId
@@ -262,15 +321,23 @@ exports.deleteProduct = async (req, res) => {
         await Product.findByIdAndDelete(productId);
 
         // Ghi lại hành vi xóa sản phẩm
-        await UserInteraction.create({
-            author: {
-                type: "Shop",
-                _id: userId
-            },
-            targetType: 'product',
-            targetId: productId,
-            action: 'delete'
-        });
+        // await UserInteraction.create({
+        //     author: {
+        //         type: "Shop",
+        //         _id: userId
+        //     },
+        //     targetType: 'product',
+        //     targetId: productId,
+        //     action: 'delete',
+        //     sessionId,
+        //     deviceInfo: {
+        //         userAgent,
+        //         ip,
+        //         platform: req.headers['sec-ch-ua-platform'] || 'unknown',
+        //         browser: req.headers['user-agent'].match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown'
+        //     },
+        //     location: geoip.lookup(ip) || {},
+        // });
 
         return successResponse(res, 'Đã xóa sản phẩm khỏi hệ thống');
     } catch (error) {
@@ -283,6 +350,10 @@ exports.toggleProductActiveStatus = async (req, res) => {
     try {
         const { productId } = req.params;
         const userId = req.actor._id.toString();
+
+        const sessionId = req.sessionId;
+        const ip = req.ip;
+        const userAgent = req.headers['user-agent'];
 
         const product = await Product.findOne({
             _id: productId,
@@ -319,6 +390,14 @@ exports.toggleProductActiveStatus = async (req, res) => {
         //     }, targetType: 'product',
         //     targetId: product._id,
         //     action: 'toggle_status',
+        //     sessionId,
+        //     deviceInfo: {
+        //         userAgent,
+        //         ip,
+        //         platform: req.headers['sec-ch-ua-platform'] || 'unknown',
+        //         browser: req.headers['user-agent'].match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown'
+        //     },
+        //     location: geoip.lookup(ip) || {},
         //     metadata: { isActive: product.isActive }
         // });
 
@@ -333,6 +412,10 @@ exports.toggleAllowPosts = async (req, res) => {
     try {
         const { productId } = req.params;
         const userId = req.actor._id.toString();
+
+        const sessionId = req.sessionId;
+        const ip = req.ip;
+        const userAgent = req.headers['user-agent'];
 
         // Tìm sản phẩm và kiểm tra quyền sở hữu
         const product = await Product.findOne({
@@ -349,18 +432,26 @@ exports.toggleAllowPosts = async (req, res) => {
         await product.save();
 
         // Ghi lại hành vi thay đổi (nếu cần)
-        await UserInteraction.create({
-            author: {
-                type: "Shop",
-                _id: userId
-            },
-            targetType: 'product',
-            targetId: product._id,
-            action: 'toggle_allow_posts',
-            metadata: {
-                allowPosts: product.allowPosts
-            }
-        });
+        // await UserInteraction.create({
+        //     author: {
+        //         type: "Shop",
+        //         _id: userId
+        //     },
+        //     targetType: 'product',
+        //     targetId: product._id,
+        //     action: 'toggle_allow_posts',
+        //     sessionId,
+        //     deviceInfo: {
+        //         userAgent,
+        //         ip,
+        //         platform: req.headers['sec-ch-ua-platform'] || 'unknown',
+        //         browser: req.headers['user-agent'].match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown'
+        //     },
+        //     location: geoip.lookup(ip) || {},
+        //     metadata: {
+        //         allowPosts: product.allowPosts
+        //     }
+        // });
 
         const statusText = product.allowPosts
             ? 'Đã bật chức năng đăng bài viết cho sản phẩm'
@@ -642,8 +733,7 @@ exports.getProductsByShopForUser = async (req, res) => {
 exports.getProductDetailForUser = async (req, res) => {
     try {
         const { slug } = req.params;
-        const userId = req.actor._id.toString();
-        const typeActor = req.actor.type === "shop" ? "Shop" : "User";
+        const userId = req?.actor?._id.toString();
 
         // Query params cho reviews
         const { reviewPage = 1, reviewLimit = 5, sortBy = 'newest' } = req.query;
@@ -694,7 +784,7 @@ exports.getProductDetailForUser = async (req, res) => {
 
         // Lấy danh sách reviews của sản phẩm với populate và phân trang
         const [reviews, totalReviews] = await Promise.all([
-            ProductReview.find({
+            ProductReviews.find({
                 product: product._id,
                 status: 'active'
             })
@@ -711,21 +801,21 @@ exports.getProductDetailForUser = async (req, res) => {
                         select: 'name variants'
                     }
                 })
-                .populate({
-                    path: 'replies',
-                    populate: {
-                        path: 'author._id',
-                        select: 'name avatar',
-                        refPath: 'author.type'
-                    }
-                })
+                // .populate({
+                //     path: 'replies',
+                //     populate: {
+                //         path: 'author._id',
+                //         select: 'name avatar',
+                //         refPath: 'author.type'
+                //     }
+                // })
                 .select('rating title content images videos likes isVerified createdAt reviewer order')
                 .sort(reviewSort)
                 .skip(reviewSkip)
                 .limit(parseInt(reviewLimit))
                 .lean(),
 
-            ProductReview.countDocuments({
+            ProductReviews.countDocuments({
                 product: product._id,
                 status: 'active'
             })
@@ -771,25 +861,6 @@ exports.getProductDetailForUser = async (req, res) => {
                 item.product._id.toString() === product._id.toString()
             )?.selectedVariant
         }));
-
-        // Ghi lại hành vi xem sản phẩm nếu người dùng đã đăng nhập
-        if (userId) {
-            await UserInteraction.create({
-                author: {
-                    type: typeActor,
-                    _id: userId
-                },
-                targetType: 'product',
-                targetId: product._id,
-                action: 'view',
-                metadata: {
-                    mainCategory: product.mainCategory,
-                    categories: product.categories,
-                    price: product.price,
-                    hashtags: product.hashtags
-                }
-            });
-        }
 
         return successResponse(res, 'Lấy thông tin sản phẩm thành công', {
             product,
@@ -946,6 +1017,9 @@ exports.getProductBySlug = async (req, res) => {
     try {
         const { slug } = req.params;
         const userId = req.actor._id.toString();
+        const sessionId = req.sessionId;
+        const ip = req.ip;
+        const userAgent = req.headers['user-agent'];
 
         // Lấy thông tin sản phẩm (chỉ sản phẩm đang bán)
         const product = await Product.findOne({
@@ -970,6 +1044,14 @@ exports.getProductBySlug = async (req, res) => {
                 targetType: 'product',
                 targetId: product._id,
                 action: 'view',
+                sessionId,
+                deviceInfo: {
+                    userAgent,
+                    ip,
+                    platform: req.headers['sec-ch-ua-platform'] || 'unknown',
+                    browser: req.headers['user-agent'].match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown'
+                },
+                location: geoip.lookup(ip) || {},
                 metadata: {
                     mainCategory: product.mainCategory,
                     categories: product.categories,

@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Button } from '../../components/ui/button';
-import { Card, CardContent } from '../../components/ui/card';
-import DailySuggestions from '../../components/marketplace/DailySuggestions';
-import { getProductDetailForUser } from '../../services/productService';
-import { Heart, Share2, ShoppingCart, MessageCircle, Star, Truck, Shield, RotateCcw, Award } from 'lucide-react';
-import { toast } from 'sonner';
-import { useCart } from '../../contexts/CartContext';
+"use client"
 
+import { useState, useEffect } from "react"
+import { useParams, useNavigate } from "react-router-dom"
+import { Button } from "../../components/ui/button"
+import { Card, CardContent } from "../../components/ui/card"
+import DailySuggestions from "../../components/marketplace/DailySuggestions"
+import { getProductDetailForUser } from "../../services/productService"
+import { Heart, Share2, ShoppingCart, MessageCircle, Star, Truck, Shield, RotateCcw, Award } from "lucide-react"
+import { toast } from "sonner"
+import { useCart } from "../../contexts/CartContext"
 
 export default function ProductDetail() {
   const { slug } = useParams()
@@ -16,6 +17,7 @@ export default function ProductDetail() {
 
   const [product, setProduct] = useState(null)
   const [relatedProducts, setRelatedProducts] = useState([])
+  const [reviewProduct, setReviewProduct] = useState({})
   const [selectedVariants, setSelectedVariants] = useState({})
   const [isAddingToCart, setIsAddingToCart] = useState(false)
   const [isBuyingNow, setIsBuyingNow] = useState(false)
@@ -29,8 +31,10 @@ export default function ProductDetail() {
   const [activeTab, setActiveTab] = useState("description")
 
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: "smooth" })
-    fetchProductDetail()
+    if (slug) {
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" })
+      fetchProductDetail()
+    }
   }, [slug])
 
   useEffect(() => {
@@ -49,6 +53,7 @@ export default function ProductDetail() {
       if (response.success) {
         setProduct(response.data.product)
         setRelatedProducts(response.data.relatedProducts)
+        setReviewProduct(response.data.reviews)
       } else {
         setError("Không thể tải thông tin sản phẩm")
       }
@@ -293,8 +298,8 @@ export default function ProductDetail() {
                           {mediaItem.type === "video" ? (
                             <div
                               className={`relative w-16 h-16 rounded-md cursor-pointer border-2 transition-colors overflow-hidden ${currentMediaType === "video" && currentMediaIndex === mediaItem.index
-                                  ? "border-pink-500"
-                                  : "border-gray-200 hover:border-gray-300"
+                                ? "border-pink-500"
+                                : "border-gray-200 hover:border-gray-300"
                                 }`}
                               onClick={() => {
                                 setCurrentMediaType("video")
@@ -316,8 +321,8 @@ export default function ProductDetail() {
                               src={mediaItem.thumbnail || "/placeholder.svg"}
                               alt={`${product.name} ${mediaItem.index + 1}`}
                               className={`w-16 h-16 object-cover rounded-md cursor-pointer border-2 transition-colors ${currentMediaType === "image" && currentMediaIndex === mediaItem.index
-                                  ? "border-pink-500"
-                                  : "border-gray-200 hover:border-gray-300"
+                                ? "border-pink-500"
+                                : "border-gray-200 hover:border-gray-300"
                                 }`}
                               onClick={() => {
                                 setCurrentMediaType("image")
@@ -375,8 +380,8 @@ export default function ProductDetail() {
                               key={optionIndex}
                               onClick={() => handleVariantSelect(variant.name, option)}
                               className={`px-4 py-2 border rounded-md transition-colors ${selectedVariants[variant.name] === option
-                                  ? "border-pink-500 bg-pink-50 text-pink-500"
-                                  : "border-gray-300 hover:border-pink-500 hover:text-pink-500"
+                                ? "border-pink-500 bg-pink-50 text-pink-500"
+                                : "border-gray-300 hover:border-pink-500 hover:text-pink-500"
                                 }`}
                             >
                               {option}
@@ -462,7 +467,10 @@ export default function ProductDetail() {
                   onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}
                 />
                 <div>
-                  <h3 className="font-bold text-lg text-gray-900 cursor-pointer hover:underline" onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}>
+                  <h3
+                    className="font-bold text-lg text-gray-900 cursor-pointer hover:underline"
+                    onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}
+                  >
                     {product.seller?.name || product.seller?.username}
                   </h3>
                   <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
@@ -480,7 +488,9 @@ export default function ProductDetail() {
                   <MessageCircle className="w-4 h-4" />
                   Chat ngay
                 </Button>
-                <Button variant="outline" onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}>Xem shop</Button>
+                <Button variant="outline" onClick={() => navigate(`/feed/profile/${product.seller?.slug}`)}>
+                  Xem shop
+                </Button>
               </div>
             </div>
           </CardContent>
@@ -529,8 +539,8 @@ export default function ProductDetail() {
                 <button
                   onClick={() => setActiveTab("description")}
                   className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === "description"
-                      ? "border-pink-500 text-pink-500"
-                      : "border-transparent text-gray-600 hover:text-gray-900"
+                    ? "border-pink-500 text-pink-500"
+                    : "border-transparent text-gray-600 hover:text-gray-900"
                     }`}
                 >
                   Mô tả sản phẩm
@@ -538,8 +548,8 @@ export default function ProductDetail() {
                 <button
                   onClick={() => setActiveTab("specifications")}
                   className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === "specifications"
-                      ? "border-pink-500 text-pink-500"
-                      : "border-transparent text-gray-600 hover:text-gray-900"
+                    ? "border-pink-500 text-pink-500"
+                    : "border-transparent text-gray-600 hover:text-gray-900"
                     }`}
                 >
                   Thông số kỹ thuật
@@ -547,8 +557,8 @@ export default function ProductDetail() {
                 <button
                   onClick={() => setActiveTab("reviews")}
                   className={`px-6 py-4 font-medium border-b-2 transition-colors ${activeTab === "reviews"
-                      ? "border-pink-500 text-pink-500"
-                      : "border-transparent text-gray-600 hover:text-gray-900"
+                    ? "border-pink-500 text-pink-500"
+                    : "border-transparent text-gray-600 hover:text-gray-900"
                     }`}
                 >
                   Đánh giá ({product.ratings?.count || 0})
@@ -588,11 +598,251 @@ export default function ProductDetail() {
 
               {activeTab === "reviews" && (
                 <div className="space-y-6">
-                  <div className="text-center py-8 text-gray-500">
-                    <Award className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                    <p>Chưa có đánh giá nào cho sản phẩm này</p>
-                    <p className="text-sm">Hãy là người đầu tiên đánh giá!</p>
+                  {/* Review Overview */}
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Overall Rating */}
+                      <div className="text-center">
+                        <div className="text-4xl font-bold text-gray-900 mb-2">
+                          {product.reviewStats?.averageRating?.toFixed(1) || product.ratings?.avg?.toFixed(1) || "0.0"}
+                        </div>
+                        <div className="flex justify-center mb-2">
+                          {renderStars(product.reviewStats?.averageRating || product.ratings?.avg || 0, "lg")}
+                        </div>
+                        <p className="text-gray-600">
+                          {product.reviewStats?.totalReviews || product.ratings?.count || 0} đánh giá
+                        </p>
+                        {product.reviewStats?.verifiedReviews > 0 && (
+                          <p className="text-sm text-green-600 mt-1">
+                            {product.reviewStats.verifiedReviews} đánh giá đã xác thực
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Rating Breakdown */}
+                      <div className="space-y-2">
+                        {[5, 4, 3, 2, 1].map((star) => {
+                          const count =
+                            product.reviewStats?.ratingDistribution?.[
+                            star === 5
+                              ? "five"
+                              : star === 4
+                                ? "four"
+                                : star === 3
+                                  ? "three"
+                                  : star === 2
+                                    ? "two"
+                                    : "one"
+                            ] || 0
+                          const percentage =
+                            product.reviewStats?.ratingPercentage?.[
+                            star === 5
+                              ? "five"
+                              : star === 4
+                                ? "four"
+                                : star === 3
+                                  ? "three"
+                                  : star === 2
+                                    ? "two"
+                                    : "one"
+                            ] || 0
+
+                          return (
+                            <div key={star} className="flex items-center gap-2">
+                              <span className="text-sm font-medium w-6">{star}</span>
+                              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                <div
+                                  className="bg-yellow-400 h-2 rounded-full transition-all duration-300"
+                                  style={{ width: `${percentage}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-sm text-gray-600 w-12">{count}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Reviews List */}
+                  {reviewProduct?.data && reviewProduct.data.length > 0 ? (
+                    <div className="space-y-6">
+                      {/* Sort Options */}
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-semibold">Đánh giá từ khách hàng</h3>
+                        <select className="border border-gray-300 rounded-md px-3 py-2 text-sm" defaultValue="newest">
+                          <option value="newest">Mới nhất</option>
+                          <option value="oldest">Cũ nhất</option>
+                          <option value="rating_high">Điểm cao nhất</option>
+                          <option value="rating_low">Điểm thấp nhất</option>
+                          <option value="most_liked">Nhiều like nhất</option>
+                        </select>
+                      </div>
+
+                      {/* Reviews */}
+                      <div className="space-y-4">
+                        {reviewProduct.data.map((review) => (
+                          <div
+                            key={review._id}
+                            className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow"
+                          >
+                            {/* Review Header */}
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={review.reviewer._id?.avatar || "/default-avatar.png"}
+                                  alt={review.reviewer._id?.name || review.reviewer._id?.fullName}
+                                  className="w-10 h-10 rounded-full object-cover"
+                                />
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-medium text-gray-900">{review.reviewer._id?.name || review.reviewer._id?.fullName}</h4>
+                                    {review.isVerified && (
+                                      <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                                        <Shield className="w-3 h-3" />
+                                        Đã mua hàng
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <div className="flex">{renderStars(review.rating)}</div>
+                                    <span className="text-sm text-gray-500">
+                                      {new Date(review.createdAt).toLocaleDateString("vi-VN")}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Review Content */}
+                            <div className="space-y-3">
+                              {review.title && <h5 className="font-medium text-gray-900">{review.title}</h5>}
+
+                              {review.content && <p className="text-gray-700 leading-relaxed">{review.content}</p>}
+
+                              {/* Purchased Variant */}
+                              {review.purchasedVariant && (
+                                <div className="text-sm text-gray-600">
+                                  <span className="font-medium">Phân loại:</span>{" "}
+                                  {Object.entries(review.purchasedVariant)
+                                    .map(([key, value]) => `${key}: ${value}`)
+                                    .join(", ")}
+                                </div>
+                              )}
+
+                              {/* Review Media */}
+                              {(review.images?.length > 0 || review.videos?.length > 0) && (
+                                <div className="flex gap-2 overflow-x-auto">
+                                  {review.images?.map((image, index) => (
+                                    <img
+                                      key={index}
+                                      src={image || "/placeholder.svg"}
+                                      alt={`Review image ${index + 1}`}
+                                      className="w-20 h-20 object-cover rounded-md border cursor-pointer hover:opacity-80"
+                                    />
+                                  ))}
+                                  {review.videos?.map((video, index) => (
+                                    <div key={index} className="relative w-20 h-20">
+                                      <video
+                                        src={video}
+                                        className="w-full h-full object-cover rounded-md border cursor-pointer"
+                                        muted
+                                      />
+                                      <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center rounded-md">
+                                        <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
+                                          <div className="w-0 h-0 border-l-4 border-l-gray-800 border-y-2 border-y-transparent ml-0.5"></div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Review Actions */}
+                              <div className="flex items-center gap-4 pt-2">
+                                <button className="flex items-center gap-1 text-sm text-gray-600 hover:text-pink-500 transition-colors">
+                                  <Heart
+                                    className={`w-4 h-4 ${review.isLikedByUser ? "fill-pink-500 text-pink-500" : ""}`}
+                                  />
+                                  Hữu ích ({review.likesCount || 0})
+                                </button>
+
+                                {review.replies && review.replies.length > 0 && (
+                                  <button className="text-sm text-gray-600 hover:text-pink-500 transition-colors">
+                                    {review.replies.length} phản hồi
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Seller Replies */}
+                              {review.replies && review.replies.length > 0 && (
+                                <div className="mt-3 pl-4 border-l-2 border-gray-200 space-y-2">
+                                  {review.replies.map((reply, index) => (
+                                    <div key={index} className="bg-gray-50 rounded-lg p-3">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <img
+                                          src={reply.author._id?.avatar || "/default-avatar.png"}
+                                          alt={reply.author._id?.name}
+                                          className="w-6 h-6 rounded-full object-cover"
+                                        />
+                                        <span className="text-sm font-medium text-gray-900">
+                                          {reply.author._id?.name}
+                                        </span>
+                                        <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                                          Người bán
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                          {new Date(reply.createdAt).toLocaleDateString("vi-VN")}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm text-gray-700">{reply.content}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Pagination */}
+                      {reviewProduct.pagination && reviewProduct.pagination.totalPages > 1 && (
+                        <div className="flex items-center justify-center gap-2 pt-4">
+                          <Button variant="outline" size="sm" disabled={!reviewProduct.pagination.hasPrev}>
+                            Trước
+                          </Button>
+
+                          <div className="flex items-center gap-1">
+                            {Array.from({ length: Math.min(5, reviewProduct.pagination.totalPages) }, (_, i) => {
+                              const page = i + 1
+                              const isActive = page === reviewProduct.pagination.currentPage
+                              return (
+                                <Button
+                                  key={page}
+                                  variant={isActive ? "default" : "outline"}
+                                  size="sm"
+                                  className={isActive ? "bg-pink-500 hover:bg-pink-600" : ""}
+                                >
+                                  {page}
+                                </Button>
+                              )
+                            })}
+                          </div>
+
+                          <Button variant="outline" size="sm" disabled={!reviewProduct.pagination.hasNext}>
+                            Sau
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <Award className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                      <p>Chưa có đánh giá nào cho sản phẩm này</p>
+                      <p className="text-sm">Hãy là người đầu tiên đánh giá!</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

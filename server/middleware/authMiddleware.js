@@ -5,11 +5,15 @@ const Post = require('../models/Post');
 const User = require('../models/User');
 
 exports.verifyToken = (req, res, next) => {
-    const token = req.cookies.accessToken; // Lấy từ cookie, tại vì có gửi accessToken qua cookie khi đăng nhập, nên lấy được
+    const token = req?.cookies?.accessToken; // Lấy từ cookie, tại vì có gửi accessToken qua cookie khi đăng nhập, nên lấy được
     // const authHeader = req.headers.authorization; //nằm trong header có dạng Authorization: Bearer <token>
     // const token = authHeader && authHeader.split(" ")[1]; //Tách chuỗi Bearer <token> thành mảng ["Bearer", "<token>"], lấy phần tử thứ 1 (<token>).
 
-    if (!token) return res.status(401).json({ message: "Chưa đăng nhập" });
+    // if (!token) return res.status(401).json({ message: "Chưa đăng nhập" });
+    if (!token) {
+        req.user = null; // Cho phép tiếp tục nếu không có token
+        return next();
+    }
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET); //giải mã và xác minh token, trả về dữ liệu đã mã hóa (userId, email,...)
@@ -34,6 +38,12 @@ exports.requireRole = (roles = []) => {  //roles là danh sách vai trò đượ
 
 exports.setActor = async (req, res, next) => {
     try {
+        // Nếu người dùng chưa đăng nhập, bỏ qua việc set actor
+        if (!req.user || !req.user.userId) {
+            req.actor = null; // Đặt actor = null để các controller biết user chưa đăng nhập
+            return next();
+        }
+
         const user = await User.findById(req.user.userId);
 
         if (!user) return res.status(404).json({ message: 'Không tìm thấy người dùng' });
@@ -136,7 +146,7 @@ exports.checkCommentOwnership = async (req, res, next) => {
 
 // Check ownership for Shop
 exports.checkShopOwnership = async (req, res, next) => {
-    const shopId = req.actor._id || req.params.shopId || req.body.shopId ;
+    const shopId = req.actor._id || req.params.shopId || req.body.shopId;
     try {
         const shop = await Shop.findById(shopId);
         if (!shop) return res.status(404).json({ message: "Cửa hàng không tồn tại" });

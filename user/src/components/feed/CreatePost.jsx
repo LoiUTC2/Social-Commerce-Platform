@@ -2,29 +2,34 @@ import React, { useState } from 'react';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Video, Image, Smile } from 'lucide-react';
-import avatar from '../../assets/GIABAOAVT.jpg'
+import avtAcount from '../../assets/anh-avatar-trang-tron.jpg';
 import CreatePostModal from './CreatePostModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 const CreatePost = () => {
-    const {user} = useAuth();
+    const { user, setShowLoginModal } = useAuth();
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
 
+    const handleCreatePost = async () => {
+        if (!user) return setShowLoginModal(true)
+        setOpen(true);
+    }
+
     return (
         <>
-            <div className="bg-white rounded-xl shadow-sm p-4 space-y-3 cursor-pointer " onClick={() => setOpen(true)}>
+            <div className="bg-white rounded-xl shadow-sm p-4 space-y-3 cursor-pointer " onClick={() => handleCreatePost()}>
                 <div className="flex items-center gap-3">
                     <img
-                        src={user?.avatar}
+                        src={user?.avatar || avtAcount}
                         alt="user avatar"
                         className="w-10 h-10 rounded-full object-cover"
                         onClick={() => navigate(`/feed/profile/${user?.slug}`)}
                     />
                     <Input
                         className="rounded-full bg-gray-100 px-4"
-                        placeholder="Lợi ơi, bạn đang nghĩ gì thế?"
+                        placeholder={`${user?.fullName || user?.name || "Bạn"} ơi, bạn đang nghĩ gì thế?`}
                     />
                 </div>
 

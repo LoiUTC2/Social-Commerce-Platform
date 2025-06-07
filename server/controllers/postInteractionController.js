@@ -3,17 +3,17 @@ const UserInteraction = require('../models/UserInteraction');
 const { successResponse, errorResponse } = require('../utils/response');
 const Comment = require('../models/Comment');
 const mongoose = require('mongoose');
-
+const geoip = require('geoip-lite');
+const { trackInteraction } = require('../middleware/interactionMiddleware');
 
 exports.likePost = async (req, res) => {
     try {
-        // const { userId } = req.user;
-        const actor = req.actor; // [Grok] Lấy thông tin actor từ middleware setActor, chứa _id và type (user/shop)
+        const actor = req.actor;
         const { id: postId } = req.params;
 
         const existing = await UserInteraction.findOne({
             "author._id": actor._id,
-            "author.type": actor.type === 'shop' ? 'Shop' : 'User', // [Grok] Kiểm tra cả type và _id của author để xác định tương tác trước đó
+            "author.type": actor.type === 'shop' ? 'Shop' : 'User',
             targetType: 'post',
             targetId: postId,
             action: 'like'
@@ -32,17 +32,17 @@ exports.likePost = async (req, res) => {
             );
             message = 'Đã bỏ thích bài viết';
             newLikesCount = updated.likesCount;
-        } else {
-            // Like
-            await UserInteraction.create({
-                author: {
-                    type: actor.type === 'shop' ? 'Shop' : 'User',
-                    _id: actor._id
-                }, // [Grok] Lưu author với type và _id thay vì userId
+
+            // Ghi nhận hành vi unlike
+            req.body = {
                 targetType: 'post',
                 targetId: postId,
-                action: 'like',
-            });
+                action: 'unlike',
+                metadata: { previousLikesCount: newLikesCount + 1 }
+            };
+            await trackInteraction(req, res, () => {});
+        } else {
+            // Like
             const updated = await Post.findByIdAndUpdate(
                 postId,
                 { $inc: { likesCount: 1 } },
@@ -50,6 +50,15 @@ exports.likePost = async (req, res) => {
             );
             message = 'Đã thích bài viết';
             newLikesCount = updated.likesCount;
+
+            // Ghi nhận hành vi like
+            req.body = {
+                targetType: 'post',
+                targetId: postId,
+                action: 'like',
+                metadata: { newLikesCount }
+            };
+            await trackInteraction(req, res, () => {});
         }
         return successResponse(res, message, { likesCount: newLikesCount });
     } catch (err) {
@@ -109,36 +118,33 @@ exports.commentOrReply = async (req, res) => {
         let replyCount = 0;
 
         if (!parentId) {
-            // Tạo interaction cho bình luận bài viết
-            await UserInteraction.create({
-                author: {
-                    type: actor.type === 'shop' ? 'Shop' : 'User',
-                    _id: actor._id
-                },
-                targetType: 'post',
-                targetId: postId,
-                action: 'comment',
-                metadata: { text }
-            });
-
             // Cập nhật số lượng bình luận của bài viết
             const post = await Post.findByIdAndUpdate(postId, { $inc: { commentsCount: 1 } }, { new: true });
             commentsCount = post.commentsCount;
+
+            // Ghi nhận hành vi comment
+            req.body = {
+                targetType: 'post',
+                targetId: postId,
+                action: 'comment',
+                metadata: { text, commentsCount }
+            };
+            // Tạo interaction cho bình luận bài viết
+            await trackInteraction(req, res, () => {});
+            
         } else {
-            // Tạo interaction cho reply comment
-            await UserInteraction.create({
-                author: {
-                    type: actor.type === 'shop' ? 'Shop' : 'User',
-                    _id: actor._id
-                },
+            // Đếm số lượng reply của comment cha
+            replyCount = await Comment.countDocuments({ parentId });
+
+            // Ghi nhận hành vi reply
+            req.body = {
                 targetType: 'comment',
                 targetId: parentId,
                 action: 'comment',
-                metadata: { text }
-            });
-
-            // Đếm số lượng reply của comment cha
-            replyCount = await Comment.countDocuments({ parentId });
+                metadata: { text, replyCount }
+            };
+            // Tạo interaction cho reply comment
+            await trackInteraction(req, res, () => {});
         }
 
         return successResponse(res, 'Bình luận thành công', {
@@ -167,7 +173,6 @@ exports.likeComment = async (req, res) => {
         if (comment.likes.includes(actor._id)) {
             // 👎 Nếu đã like → bỏ like
             await Comment.findByIdAndUpdate(commentId, { $pull: { likes: actor._id } });
-
             await UserInteraction.deleteOne({
                 "author._id": actor._id,
                 "author.type": actor.type === 'shop' ? 'Shop' : 'User', // [Grok] Xóa tương tác dựa trên cả author._id và author.type
@@ -175,21 +180,27 @@ exports.likeComment = async (req, res) => {
                 targetId: commentId,
                 action: 'like'
             });
+
+            // Ghi nhận hành vi unlike
+            req.body = {
+                targetType: 'comment',
+                targetId: commentId,
+                action: 'unlike'
+            };
+            await trackInteraction(req, res, () => {});
         } else {
             // 👍 Nếu chưa like → thêm like
             await Comment.findByIdAndUpdate(commentId, { $addToSet: { likes: actor._id } });
 
-            await UserInteraction.create({
-                author: {
-                    type: actor.type === 'shop' ? 'Shop' : 'User',
-                    _id: actor._id
-                }, // [Grok] Lưu author thay vì userId
+            isLiked = true;
+
+            // Ghi nhận hành vi like
+            req.body = {
                 targetType: 'comment',
                 targetId: commentId,
                 action: 'like'
-            });
-
-            isLiked = true;
+            };
+            await trackInteraction(req, res, () => {});
         }
         const updatedComment = await Comment.findById(commentId);
         const totalLikes = updatedComment.likes.length;
@@ -308,7 +319,7 @@ exports.getCommentsByPost = async (req, res) => {
 
         // Apply pagination sau khi sort
         const paginatedComments = comments.slice(skip, skip + limitNumber);
-        
+
         const commentMap = {};
 
         // Map tầng 1
@@ -439,24 +450,24 @@ exports.sharePost = async (req, res) => {
             }, // [Grok] Sử dụng author thay vì userId cho Post
             content: content || '',
             sharedPost: postId,
+            hashtags: originalPost.hashtags,
+            mainCategory: originalPost.mainCategory,
             privacy,
             type: 'share'
         });
 
         await newPost.save();
 
-        await UserInteraction.create({
-            author: {
-                type: actor.type === 'shop' ? 'Shop' : 'User',
-                _id: actor._id
-            }, // [Grok] Lưu author thay vì userId
+        await Post.findByIdAndUpdate(postId, { $inc: { sharesCount: 1 } });
+
+        // Ghi nhận hành vi share
+        req.body = {
             targetType: 'post',
             targetId: postId,
             action: 'share',
             metadata: { sharedPostId: newPost._id }
-        });
-
-        await Post.findByIdAndUpdate(postId, { $inc: { sharesCount: 1 } });
+        };
+        await trackInteraction(req, res, () => {});
 
         return successResponse(res, 'Đã chia sẻ bài viết', newPost);
     } catch (err) {

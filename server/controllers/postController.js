@@ -1,8 +1,32 @@
+const Hashtag = require('../models/Hashtags');
 const Post = require('../models/Post');
 const Product = require('../models/Product');
 const Shop = require('../models/Shop');
 const User = require('../models/User');
 const { successResponse, errorResponse } = require('../utils/response');
+
+//Thêm hoặc sửa hashtags
+async function handleHashtagsUpdate(actorType, postId, hashtags = [], createdById) {
+  for (const rawTag of hashtags) {
+    const tagName = rawTag.trim().toLowerCase();
+    if (!tagName) continue;
+
+    const hashtag = await Hashtag.findOneAndUpdate(
+      { name: tagName },
+      {
+        $setOnInsert: {
+          name: tagName,
+          createdBy: createdById,
+          createdByModel: actorType
+        },
+        $addToSet: { posts: postId },
+        $set: { lastUsedAt: new Date() },
+        $inc: { usageCount: 1 }
+      },
+      { upsert: true, new: true }
+    );
+  }
+}
 
 exports.createPost = async (req, res) => {
   try {
@@ -12,7 +36,7 @@ exports.createPost = async (req, res) => {
       videos = [],
       productIds = [],
       hashtags = [],
-      categories = [],
+      mainCategory,
       location = ''
     } = req.body;
 
@@ -26,7 +50,7 @@ exports.createPost = async (req, res) => {
       videos,
       productIds,
       hashtags,
-      categories,
+      mainCategory,
       location,
     });
 
@@ -43,6 +67,8 @@ exports.createPost = async (req, res) => {
       );
     }
 
+    await handleHashtagsUpdate(req.actor.type === 'shop' ? 'Shop' : 'User', newPost._id, req.body.hashtags, req.actor._id);
+
     return successResponse(res, 'Tạo bài viết thành công', savedPost);
   } catch (err) {
     return errorResponse(res, 'Lỗi tạo bài viết', 500, err.message);
@@ -54,6 +80,7 @@ exports.updatePost = async (req, res) => {
   try {
     const { id } = req.params;
     const actorId = req.actor._id;
+    const actorType = req.actor.type === "shop" ? "Shop" : "User";
 
     // Tìm bài viết hiện tại
     const post = await Post.findById(id);
@@ -72,7 +99,7 @@ exports.updatePost = async (req, res) => {
       videos = [],
       productIds = [],
       hashtags = [],
-      categories = [],
+      mainCategory,
       location,
       privacy
     } = req.body;
@@ -87,12 +114,16 @@ exports.updatePost = async (req, res) => {
     post.videos = videos || post.videos;
     post.productIds = productIds || post.productIds;
     post.hashtags = hashtags || post.hashtags;
-    post.categories = categories || post.categories;
+    post.mainCategory = mainCategory || post.mainCategory;
     post.location = location !== undefined ? location : post.location;
     post.privacy = privacy || post.privacy;
     post.updatedAt = Date.now();
 
     const updatedPost = await post.save();
+
+    if (updatedPost.hashtags) {
+      await handleHashtagsUpdate(actorType, updatedPost._id, updatedPost.hashtags, actorId);
+    }
 
     // Kiểm tra và cập nhật trường posts trong Product nếu có thay đổi productIds
     if (JSON.stringify(oldProductIds) !== JSON.stringify(newProductIds)) {

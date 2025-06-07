@@ -54,20 +54,22 @@ exports.createShopReview = async (req, res) => {
             isVerified: true
         });
 
-        // Ghi hành vi cho AI học
-        await logUserInteraction(req.actor, {
+        // Ghi nhận hành vi create
+        req.body = {
             targetType: 'shop',
             targetId: shop,
             action: 'review',
             metadata: {
-                rating,
                 type: 'shop-review',
+                rating,
                 orderId: order,
                 hasTitle: !!title,
                 contentLength: content.length,
                 reviewId: review._id
             }
-        });
+        };
+
+        await trackInteraction(req, res, () => { });
 
         // Cập nhật avgRating cho shop
         await updateShopRatingStats(shop);
@@ -143,6 +145,21 @@ exports.updateShopReview = async (req, res) => {
 
         await updateShopRatingStats(shopId);
 
+        // Ghi nhận hành vi update nếu rating thay đổi
+        if (oldRating !== rating) {
+            req.body = {
+                targetType: 'shop',
+                targetId: shopId,
+                action: 'update',
+                metadata: {
+                    type: 'shop-review-rating-update',
+                    oldRating,
+                    newRating: rating
+                }
+            };
+            await trackInteraction(req, res, () => { });
+        }
+
         return successResponse(res, 'Cập nhật đánh giá thành công', review);
     } catch (err) {
         return errorResponse(res, 'Lỗi khi cập nhật đánh giá', 500, err.message);
@@ -165,6 +182,15 @@ exports.deleteShopReview = async (req, res) => {
 
         await updateShopRatingStats(review.shop);
 
+        // Ghi nhận hành vi delete
+        req.body = {
+            targetType: 'shop',
+            targetId: review.shop,
+            action: 'delete',
+            metadata: { type: 'shop-review-delete' }
+        };
+        await trackInteraction(req, res, () => { });
+
         return successResponse(res, 'Xoá đánh giá thành công');
     } catch (err) {
         return errorResponse(res, 'Lỗi khi xoá đánh giá', 500, err.message);
@@ -174,7 +200,7 @@ exports.deleteShopReview = async (req, res) => {
 exports.getShopRatingStats = async (req, res) => {
     try {
         const { shopId } = req.params;
-        
+
         const shop = await Shop.findById(shopId).select('stats.rating');
         if (!shop) {
             return errorResponse(res, 'Không tìm thấy shop', 404);

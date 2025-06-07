@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const tokenService = require('../utils/tokenService');
 const { successResponse, errorResponse } = require('../utils/response');
 const Shop = require('../models/Shop');
+const UserInteraction = require('../models/UserInteraction');
 
 const sendTokenCookies = (res, accessToken, refreshToken) => {
     // Access Token
@@ -165,6 +166,15 @@ exports.login = async (req, res) => {
         const payload = { userId: user._id, role: user.role };
         const accessToken = tokenService.generateAccessToken(payload);
         const refreshToken = tokenService.generateRefreshToken(payload);
+
+        // Chuyển hành vi từ sessionId sang author
+        const sessionId = req.sessionId;
+        const authorType = user.role === 'seller' && user.shopId ? 'Shop' : 'User';
+        const authorId = authorType === 'Shop' ? user.shopId : user._id;
+        await UserInteraction.updateMany(
+            { sessionId, author: { $exists: false } },
+            { $set: { author: { type: authorType, _id: authorId } } }
+        );
 
         user.refreshToken = refreshToken;
         user.refreshTokenUsage = 0;

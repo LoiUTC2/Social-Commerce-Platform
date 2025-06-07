@@ -4,6 +4,7 @@ const Product = require('../models/Product');
 const { successResponse, errorResponse } = require('../utils/response');
 const { updateProductRatingStats } = require('../utils/updateProductRating');
 const logUserInteraction = require('../utils/logUserInteraction');
+const { trackInteraction } = require('../middleware/interactionMiddleware');
 
 exports.createReview = async (req, res) => {
     try {
@@ -79,18 +80,19 @@ exports.createReview = async (req, res) => {
         // Populate thông tin reviewer
         await review.populate('reviewer._id', 'fullName avatar');
 
-        // Ghi hành vi cho AI học
-        await logUserInteraction(req.actor, {
+        // Ghi nhận hành vi review
+        req.body = {
             targetType: 'product',
             targetId: product,
             action: 'review',
             metadata: { 
-                rating, 
                 type: 'product-review',
+                rating,
                 orderId: order,
                 shopId: shop
             }
-        });
+        };
+        await trackInteraction(req, res, () => {});
 
         // Cập nhật avgRating cho product
         await updateProductRatingStats(product);
@@ -200,9 +202,9 @@ exports.updateReview = async (req, res) => {
         // ✅ Sửa lỗi: dùng review.product thay vì product
         await updateProductRatingStats(review.product);
 
-        // ✅ Log hành vi update nếu rating thay đổi
+        // Ghi nhận hành vi update nếu rating thay đổi
         if (oldRating !== review.rating) {
-            await logUserInteraction(req.actor, {
+            req.body = {
                 targetType: 'product',
                 targetId: review.product,
                 action: 'update',
@@ -211,7 +213,8 @@ exports.updateReview = async (req, res) => {
                     oldRating,
                     newRating: review.rating
                 }
-            });
+            };
+            await trackInteraction(req, res, () => {});
         }
 
         return successResponse(res, 'Cập nhật đánh giá thành công', review);
@@ -246,13 +249,14 @@ exports.deleteReview = async (req, res) => {
         // ✅ Sửa lỗi: dùng review.product thay vì product
         await updateProductRatingStats(review.product);
 
-        // Log hành vi delete
-        await logUserInteraction(req.actor, {
+        // Ghi nhận hành vi delete
+        req.body = {
             targetType: 'product',
             targetId: review.product,
             action: 'delete',
             metadata: { type: 'review-delete' }
-        });
+        };
+        await trackInteraction(req, res, () => {});
 
         return successResponse(res, 'Xoá đánh giá thành công');
     } catch (err) {
@@ -278,13 +282,14 @@ exports.likeReview = async (req, res) => {
 
         await review.save();
 
-        // ✅ Log hành vi like/unlike
-        await logUserInteraction(req.actor, {
+        // Ghi nhận hành vi like/unlike
+        req.body = {
             targetType: 'review',
             targetId: reviewId,
             action: hasLiked ? 'unlike' : 'like',
             metadata: { type: 'review-interaction' }
-        });
+        };
+        await trackInteraction(req, res, () => {});
 
         return successResponse(res, hasLiked ? 'Bỏ thích' : 'Đã thích', {
             isLiked: !hasLiked,
