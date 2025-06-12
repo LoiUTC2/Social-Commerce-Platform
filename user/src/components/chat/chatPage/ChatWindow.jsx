@@ -1,6 +1,8 @@
 import React from 'react';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
+import useChat from '../../../hooks/useChat';
+
 
 const messages = [
   { id: 1, text: 'Chào shop, sản phẩm này còn không ạ?', sender: 'me' },
@@ -9,6 +11,19 @@ const messages = [
 ];
 
 const ChatWindow = () => {
+  const {
+        messages,
+        users,
+        isConnected,
+        sendMessage,
+    } = useChat('123');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        sendMessage('check');
+
+
+    };
   return (
     <div className="flex flex-col h-[calc(100vh-110px)]">
       {/* Header chat */}
@@ -32,8 +47,8 @@ const ChatWindow = () => {
       </div>
 
       {/* Nhập tin nhắn */}
-      <div className="border-t p-2">
-        <MessageInput />
+      <div className="border-t p-2" >
+        <MessageInput handleSend={handleSubmit}/>
       </div>
     </div>
   );

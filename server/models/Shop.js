@@ -8,6 +8,8 @@ const shopSchema = new mongoose.Schema({
     slug: { type: String, unique: true },
     description: { type: String, default: '' },
 
+    savedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
+
     // Hình ảnh nhận diện
     avatar: { type: String },
     logo: { type: String, default: '' },

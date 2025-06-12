@@ -1,15 +1,24 @@
 const express = require('express');
+const http = require('http');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const cors = require('cors');
 require('dotenv').config();
 const connectDB = require('./config/database'); 
 const cookieParser = require('cookie-parser');
+const { initializeCronJobs } = require('./services/cronJobs');
+const  SocketHandler = require('./socket/socketHandler');
 
 const app = express();
 
+const server = http.createServer(app);
+
 // Kết nối database trước khi khởi động server
 connectDB();
+
+const socketHandler = new SocketHandler(server);
+
+app.locals.socketHandler = socketHandler
 
 // app.use(cors());
 app.use(cors({
@@ -58,11 +67,15 @@ const orderRoutes = require('./routes/orderRoutes')
 const productReviewRoutes = require('./routes/productReviewRoutes')
 const shopReviewRoutes = require('./routes/shopReviewRoutes')
 const hashtagsRoutes = require('./routes/hashtagsRouter')
+const followRoutes = require('./routes/followRoutes');
 
 const shopManagerRoutes = require('./routes/shopManagerRoutes');
 const adminProductRoutes = require('./routes/adminProductRoutes');
 
 const searchRoutes = require('./routes/searchRoutes');
+
+const recommendationRoutes = require('./routes/recommendationRoutes');
+app.use('/api/recommendations', recommendationRoutes);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/interactions', interactionRoutes);
@@ -77,6 +90,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/product-reviews', productReviewRoutes);
 app.use('/api/shop-reviews', shopReviewRoutes);
 app.use('/api/hashtags', hashtagsRoutes);
+app.use('/api/follow', followRoutes);
 
 app.use('/api/admin/shops', shopManagerRoutes); //quản lí duyệt shop đăng kí
 app.use('/api/admin/products', adminProductRoutes); //quản lí sản phẩm nền tảng
@@ -87,8 +101,14 @@ app.use('/api/search', searchRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/uploads', express.static('uploads')); // phục vụ file tĩnh
 
+// Khởi động cron jobs
+initializeCronJobs();
 
 // Khởi động server
-app.listen(5000, () => {
+// app.listen(5000, () => {
+//   console.log('🚀 Server started on port 5000');
+// });
+
+server.listen(5000, () => {
   console.log('🚀 Server started on port 5000');
 });

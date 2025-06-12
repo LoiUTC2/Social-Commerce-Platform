@@ -4,6 +4,7 @@ const logUserInteraction = require('../utils/logUserInteraction');
 const { successResponse, errorResponse } = require('../utils/response');
 const updateShopRatingStats = require('../utils/updateShopRating');
 const Order = require('../models/Order');
+const { trackInteraction } = require('../middleware/interactionMiddleware');
 
 
 exports.createShopReview = async (req, res) => {

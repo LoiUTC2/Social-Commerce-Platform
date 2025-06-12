@@ -62,6 +62,8 @@ const userInteractionSchema = new mongoose.Schema({
     required: true
   },
 
+  count: { type: Number, default: 1 }, // đếm số lượng hành vi nếu trùng nhau, ví dụ: người dùng xem bài viết 2 lần, khỏi phải tạo 2 bản ghi
+
   // ✅ Thêm thông tin session và device để phân tích behavior tốt hơn
   sessionId: { type: String, required: true }, // Để track cùng một session, // Bắt buộc để hỗ trợ người dùng chưa đăng nhập
   deviceInfo: {
@@ -94,10 +96,18 @@ const userInteractionSchema = new mongoose.Schema({
     // }
   },
 
+  //Nội dung search
+  searchSignature: {
+    query: String,
+    category: String,
+    hashtags: [String]
+  },
+
   // ✅ Thêm trọng số cho AI học
   weight: { type: Number, default: 0 }, // Trọng số của hành vi (mua hàng = 10, view = 1)
 
   timestamp: { type: Date, default: Date.now },
+  lastInteraction: { type: Date, default: Date.now }, // Track lần tương tác cuối
 
   // ✅ Thêm TTL để tự động xóa data cũ (tùy chọn)
   expiresAt: {
@@ -106,8 +116,8 @@ const userInteractionSchema = new mongoose.Schema({
   }
 });
 
-// Pre-save middleware để gán trọng số và điền thông tin ngữ nghĩa
-userInteractionSchema.pre('save', async function (next) {
+// ✅ Tách logic tính weight thành helper function
+const getActionWeight = (action) => {
   const actionWeights = {
     'view': 1,
     'like': 2,
@@ -120,11 +130,11 @@ userInteractionSchema.pre('save', async function (next) {
     'add_to_cart': 9,
     'update_cart_item': 7,
     'purchase': 10,
-    'create': 7, ///
-    'update': 5, ///
-    'delete': -5, ///
-    'toggle_status': 3, ///
-    'toggle_allow_posts': 3, ///
+    'create': 7,
+    'update': 5,
+    'delete': -5,
+    'toggle_status': 3,
+    'toggle_allow_posts': 3,
     'search': 3,
     'unlike': -2,
     'unsave': -5,
@@ -138,27 +148,164 @@ userInteractionSchema.pre('save', async function (next) {
     'reply': 3,
     'report': 0
   };
-  // Luôn gán weight dựa trên action
-  this.weight = actionWeights[this.action] || 0;
+  return actionWeights[action] || 0;
+};
 
-  // Nếu là action 'search', điền thông tin từ metadata
-  if (this.action === 'search') {
-    this.targetDetails = {
-      searchQuery: this.targetDetails?.searchQuery || this.metadata?.keyword || null,
-      resultsCount: this.targetDetails?.resultsCount || this.metadata?.resultsCount || 0,
-      hasResults: this.targetDetails?.hasResults || this.metadata?.hasResults || false,
-      category: this.targetDetails?.category || null,
-      hashtags: this.targetDetails?.hashtags || this.metadata?.hashtags || []
-    };
-    // Xóa các trường đã chuyển sang targetDetails khỏi metadata
-    delete this.metadata.keyword;
-    delete this.metadata.resultsCount;
-    delete this.metadata.hasResults;
-    delete this.metadata.hashtags;
+// ✅ Tách logic xử lý search targetDetails
+const processSearchTargetDetails = (targetDetails, metadata) => {
+  const processedDetails = {
+    searchQuery: targetDetails?.searchQuery || metadata?.keyword || null,
+    resultsCount: targetDetails?.resultsCount || metadata?.resultsCount || 0,
+    hasResults: targetDetails?.hasResults || (metadata?.hasResults !== undefined ? metadata.hasResults : false),
+    category: targetDetails?.category || null,
+    hashtags: targetDetails?.hashtags || metadata?.hashtags || []
+  };
+
+  // Tạo metadata mới không chứa các field đã được xử lý
+  const cleanedMetadata = { ...metadata };
+  delete cleanedMetadata.keyword;
+  delete cleanedMetadata.resultsCount;
+  delete cleanedMetadata.hasResults;
+  delete cleanedMetadata.hashtags;
+
+  return { processedDetails, cleanedMetadata };
+};
+
+
+// Pre-save middleware để xử lý các document được tạo trực tiếp (không qua recordInteraction)
+userInteractionSchema.pre('save', async function (next) {
+  // Chỉ xử lý nếu document mới hoặc các field quan trọng bị thay đổi
+  if (this.isNew || this.isModified('action') || this.isModified('count')) {
+    let baseWeight = getActionWeight(this.action);
+    this.weight = baseWeight * (this.count || 1);
+
+    // Xử lý search action
+    if (this.action === 'search') {
+      const { processedDetails, cleanedMetadata } = processSearchTargetDetails(this.targetDetails, this.metadata);
+      this.targetDetails = processedDetails;
+      this.metadata = cleanedMetadata;
+    }
   }
 
   next();
 });
+
+
+//Hàm tăng count nếu như có hành vi trùng nhau, giúp tránh tạo bản ghi, trong này có cập nhật weight của các hành vi
+userInteractionSchema.statics.recordInteraction = async function (interactionData) {
+  const { author, targetType, targetId, action, sessionId, metadata = {} } = interactionData;
+
+  // Tạo filter để tìm bản ghi trùng lặp
+  const filter = {
+    targetType,
+    action,
+    sessionId
+  };
+
+  // Thêm targetId nếu có (search không có targetId)
+  if (targetId) {
+    filter.targetId = targetId;
+  }
+
+  // Thêm author nếu có (anonymous user không có author)
+  if (author && author._id) {
+    filter['author._id'] = author._id;
+    filter['author.type'] = author.type;
+  }
+
+  // Đối với search, phân biệt theo nội dung search để AI học tốt hơn
+  if (action === 'search') {
+    const searchQuery = interactionData.targetDetails?.searchQuery || metadata?.keyword;
+    const category = interactionData.targetDetails?.category;
+    const hashtags = interactionData.targetDetails?.hashtags;
+
+    // Tạo unique key dựa trên nội dung search
+    filter.searchSignature = {
+      query: searchQuery ? searchQuery.toLowerCase().trim() : null,
+      category: category || null,
+      hashtags: hashtags && hashtags.length > 0 ? hashtags.sort() : null
+    };
+  }
+
+  try {
+    // Tính weight ban đầu dựa trên action
+    const baseWeight = getActionWeight(action);
+
+    // Xử lý targetDetails cho search action
+    let processedTargetDetails = interactionData.targetDetails || {};
+    let cleanedMetadata = metadata;
+
+    if (action === 'search') {
+      const processed = processSearchTargetDetails(interactionData.targetDetails, metadata);
+      processedTargetDetails = processed.processedDetails;
+      cleanedMetadata = processed.cleanedMetadata;
+    }
+
+    // ✅ Sử dụng aggregation pipeline để tính weight chính xác
+    const result = await this.findOneAndUpdate(
+      filter,
+      [
+        {
+          $set: {
+            // Tăng count
+            count: { $add: [{ $ifNull: ["$count", 0] }, 1] },
+
+            // Tính weight = baseWeight * newCount
+            weight: { $multiply: [baseWeight, { $add: [{ $ifNull: ["$count", 0] }, 1] }] },
+
+            // Update timestamp
+            lastInteraction: new Date(),
+
+            // Giữ các field khác nếu document đã tồn tại, hoặc set từ interactionData nếu mới
+            author: { $ifNull: ["$author", author] },
+            targetType: { $ifNull: ["$targetType", targetType] },
+            targetId: { $ifNull: ["$targetId", targetId] },
+            action: { $ifNull: ["$action", action] },
+            sessionId: { $ifNull: ["$sessionId", sessionId] },
+            targetDetails: { $ifNull: ["$targetDetails", processedTargetDetails] },
+            deviceInfo: { $ifNull: ["$deviceInfo", interactionData.deviceInfo] },
+            location: { $ifNull: ["$location", interactionData.location] },
+            metadata: { $ifNull: ["$metadata", cleanedMetadata] },
+            timestamp: { $ifNull: ["$timestamp", new Date()] },
+            expiresAt: { $ifNull: ["$expiresAt", new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)] }
+          }
+        }
+      ],
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    return result;
+  } catch (error) {
+    console.error('Error recording interaction:', error);
+    throw error;
+  }
+};
+
+// ✅ Thêm method để bulk update weight (nếu cần)
+userInteractionSchema.statics.recalculateWeights = async function (filter = {}) {
+  const interactions = await this.find(filter);
+
+  const bulkOps = interactions.map(interaction => ({
+    updateOne: {
+      filter: { _id: interaction._id },
+      update: {
+        $set: {
+          weight: getActionWeight(interaction.action) * interaction.count
+        }
+      }
+    }
+  }));
+
+  if (bulkOps.length > 0) {
+    return await this.bulkWrite(bulkOps);
+  }
+
+  return { modifiedCount: 0 };
+};
 
 // ✅ Indexes để tối ưu query
 userInteractionSchema.index({ 'author._id': 1, timestamp: -1 });
@@ -166,5 +313,15 @@ userInteractionSchema.index({ targetType: 1, targetId: 1, timestamp: -1 });
 userInteractionSchema.index({ action: 1, timestamp: -1 });
 userInteractionSchema.index({ sessionId: 1 });
 userInteractionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL index
+userInteractionSchema.index({
+  'author._id': 1,
+  targetType: 1,
+  targetId: 1,
+  action: 1,
+  sessionId: 1
+}, {
+  name: 'interaction_dedup_index',
+  sparse: true // Chỉ index các document có searchSignature
+}); // Index cho việc tìm duplicate
 
 module.exports = mongoose.model('UserInteraction', userInteractionSchema);

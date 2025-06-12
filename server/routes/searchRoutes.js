@@ -3,6 +3,9 @@ const router = express.Router();
 const searchController = require('../controllers/searchController');
 const { verifyToken, setActor } = require('../middleware/authMiddleware');
 const { trackSearch, ensureSessionId, trackTiming } = require('../middleware/interactionMiddleware');
+// const { getHybridRecommendations }  = require('../services/recommendationService');
+
+// router.use('/recommendations', recommendationRouter);
 
 // Debug middleware để log requests
 const debugMiddleware = (req, res, next) => {

@@ -387,8 +387,6 @@ productSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], async functio
 });
 
 // Single field index
-productSchema.index({ slug: 1 }); // Index cho slug
-productSchema.index({ sku: 1 }); // Index cho sku
 productSchema.index({ seller: 1 }); // Index cho seller
 productSchema.index({ mainCategory: 1 }); // Index cho category chính
 productSchema.index({ 'categories': 1 }); // Index cho danh sách category
