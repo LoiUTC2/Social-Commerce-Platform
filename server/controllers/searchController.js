@@ -7,6 +7,9 @@ const Hashtag = require('../models/Hashtags');
 const Category = require('../models/Category');
 const { successResponse, errorResponse } = require('../utils/response');
 
+// Thêm gợi ý sản phẩm/bài viết liên quan vào kết quả tìm kiếm
+const { getHybridRecommendations } = require('../services/recommendationService'); 
+
 // Tìm kiếm sản phẩm - ĐÃ LOẠI BỎ trackSearchBehavior
 exports.searchProducts = async (req, res) => {
     try {
@@ -92,6 +95,9 @@ exports.searchProducts = async (req, res) => {
             filters: { category, minPrice, maxPrice, brand, condition },
             sortBy
         };
+
+        const relatedRecommendations = await getHybridRecommendations(req.user?.userId, req.sessionId, 5);
+        result.relatedRecommendations = relatedRecommendations;
 
         return successResponse(res, "Tìm kiếm sản phẩm thành công", result);
     } catch (err) {

@@ -217,6 +217,11 @@ const trackSearchBehavior = async (req, responseData) => {
                 category: categoryName,
                 hashtags
             },
+            searchSignature: {
+                query: searchQuery,
+                category: categoryName,
+                hashtags: hashtags // ✅ Đảm bảo hashtags được điền đầy đủ
+            },
             metadata: {
                 queryType, // 'text', 'hashtag', 'category'
                 searchType, // 'product', 'shop', 'hashtag', 'category', etc.
@@ -242,7 +247,8 @@ const trackSearchBehavior = async (req, responseData) => {
         console.log('💾 Saving interaction to database...');
         console.log('💾 Interaction data:', JSON.stringify(interaction, null, 2));
 
-        await UserInteraction.create(interaction);
+        // await UserInteraction.create(interaction);
+        await UserInteraction.recordInteraction(interaction);
         console.log(`✅ Successfully tracked ${queryType} search: "${searchQuery}" - ${resultsCount} results`);
 
     } catch (err) {
@@ -302,7 +308,7 @@ const trackInteraction = async (req, res, next) => {
                 .populate('mainCategory', 'name')
                 .lean();
             if (post) {
-                targetDetails = extractMetadata('post', post);
+                targetDetails = await extractMetadata('post', post);
             }
         } else if (targetType === 'comment') {
             const comment = await Comment.findById(targetId)
@@ -325,7 +331,7 @@ const trackInteraction = async (req, res, next) => {
                 })
                 .lean();
             if (product) {
-                targetDetails = extractMetadata('product', product);
+                targetDetails = await extractMetadata('product', product);
             }
         } else if (targetType === 'shop') {
             const shop = await Shop.findById(targetId)
@@ -340,7 +346,7 @@ const trackInteraction = async (req, res, next) => {
                     }
                 ]);
             if (shop) {
-                targetDetails = extractMetadata('shop', shop)
+                targetDetails = await extractMetadata('shop', shop)
             }
         }
 
@@ -373,10 +379,12 @@ const trackInteraction = async (req, res, next) => {
 
         console.log('💾 Saving interaction to database...');
         console.log('💾 Interaction data:', JSON.stringify(interaction, null, 2));
-        await UserInteraction.create(interaction);
+        // await UserInteraction.create(interaction);
+        await UserInteraction.recordInteraction(interaction);
         console.log(`✅ Successfully tracked ${action} for ${targetType} with ID ${targetId}`);
 
         next();
+
     } catch (err) {
         console.error('❌ Error tracking interaction:', err);
         console.error('❌ Error details:', {
@@ -391,33 +399,38 @@ const trackInteraction = async (req, res, next) => {
 
 const trackView = (targetType) => async (req, res, next) => {
     try {
+        console.log(`🔍 trackView middleware called for ${targetType}`);
+        console.log(`📋 Request params:`, req.params);
+        console.log(`📋 Request path:`, req.path);
+
         req._trackedViews = req._trackedViews || new Map();
 
         let targetId;
         let targetDetails = {};
         const sessionId = req.sessionId || require('crypto').randomBytes(16).toString('hex');
         const ip = req.ip;
-        const userAgent = req.headers['user-agent'];
+        const userAgent = req.headers['user-agent'] || 'unknown';
 
         console.log(`Processing trackView for ${targetType} with params:`, req.params);
 
         if (req[targetType]) {
-            console.log(`Using pre-fetched ${targetType} from req`);
+            console.log(`✅ Using pre-fetched ${targetType} from req`);
             targetId = req[targetType]._id;
-            targetDetails = extractMetadata(targetType, req[targetType]);
+            targetDetails = await extractMetadata(targetType, req[targetType]);
         } else if (req.params.slug && ['product', 'shop', 'user'].includes(targetType)) {
-            console.log(`Processing ${targetType} with slug: ${req.params.slug}`);
+            console.log(`🔍 Processing ${targetType} with slug: ${req.params.slug}`);
             const cacheKey = `${targetType}:slug:${req.params.slug}`;
             let entity;
             let cached = await client?.get(cacheKey);
             if (cached) {
                 try {
                     entity = JSON.parse(cached);
-                    console.log(`Cache hit for ${cacheKey}:`, entity);
+                    console.log(`✅ Cache hit for ${cacheKey}`);
                 } catch (err) {
-                    console.error(`Error parsing cache for ${cacheKey}:`, err);
+                    console.error(`❌ Error parsing cache for ${cacheKey}:`, err);
                 }
             } else {
+                console.log(`🔍 Fetching ${targetType} from database...`);
                 if (targetType === 'product') {
                     entity = await Product.findOne({ slug: req.params.slug })
                         .select('name mainCategory hashtags price discount stock isActive variants brand ratings soldCount')
@@ -442,50 +455,65 @@ const trackView = (targetType) => async (req, res, next) => {
                         .select('fullName roles followers following');
                 }
                 if (entity) {
-                    await client?.setEx(cacheKey, 3600, JSON.stringify(entity));
-                    console.log(`Cache set for ${cacheKey}:`, entity);
+                    await client?.setex(cacheKey, 3600, JSON.stringify(entity));
+                    console.log(`✅ Cache set for ${cacheKey}`);
                 }
             }
             if (entity) {
                 targetId = entity._id;
                 req[targetType] = entity;
-                targetDetails = extractMetadata(targetType, entity);
+                targetDetails = await extractMetadata(targetType, entity);
+                console.log(`✅ Found ${targetType} with ID: ${targetId}`);
+            } else {
+                console.log(`❌ No ${targetType} found with slug: ${req.params.slug}`);
             }
         } else if (req.params.id && targetType === 'post') {
-            console.log(`Processing post with id: ${req.params.id}`);
+            console.log(`🔍 Processing post with id: ${req.params.id}`);
+
+            // Validate ObjectId format
+            if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+                console.log(`❌ Invalid ObjectId format: ${req.params.id}`);
+                return next();
+            }
+
             const cacheKey = `${targetType}:id:${req.params.id}`;
             let entity;
             let cached = await client?.get(cacheKey);
             if (cached) {
                 try {
                     entity = JSON.parse(cached);
-                    console.log(`Cache hit for ${cacheKey}:`, entity);
+                    console.log(`✅ Cache hit for ${cacheKey}`);
                 } catch (err) {
-                    console.error(`Error parsing cache for ${cacheKey}:`, err);
+                    console.error(`❌ Error parsing cache for ${cacheKey}:`, err);
                 }
             } else {
+                console.log(`🔍 Fetching post from database with ID: ${req.params.id}`);
                 entity = await Post.findById(req.params.id)
                     .select('content hashtags categories mainCategory author isSponsored likesCount commentsCount privacy')
                     .populate({
                         path: 'mainCategory',
                         select: 'name'
                     });
+
                 if (entity) {
-                    await client?.setEx(cacheKey, 3600, JSON.stringify(entity));
-                    console.log(`Cache set for ${cacheKey}:`, entity);
+                    await client?.setex(cacheKey, 3600, JSON.stringify(entity));
+                    console.log(`✅ Cache set for ${cacheKey}, found post: ${entity._id}`);
+                } else {
+                    console.log(`❌ No post found with ID: ${req.params.id}`);
                 }
             }
             if (entity) {
                 targetId = entity._id;
                 req[targetType] = entity;
-                targetDetails = extractMetadata(targetType, entity);
+                targetDetails = await extractMetadata(targetType, entity);
+                console.log(`✅ Found post with ID: ${targetId}`);
             }
         }
 
         if (targetId) {
             const viewKey = `${targetType}:${targetId}`;
             if (req._trackedViews.has(viewKey)) {
-                console.log(`Skipping duplicate view for ${targetType} with ID ${targetId}`);
+                console.log(`⏭️ Skipping duplicate view for ${targetType} with ID ${targetId}`);
                 return next();
             }
             req._trackedViews.set(viewKey, true);
@@ -499,11 +527,13 @@ const trackView = (targetType) => async (req, res, next) => {
                     userAgent,
                     ip,
                     platform: req.headers['sec-ch-ua-platform'] || 'unknown',
-                    browser: req.headers['user-agent'].match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown'
+                    // Fix potential error when user-agent is undefined
+                    browser: (userAgent !== 'unknown' && userAgent) ?
+                        (userAgent.match(/(Chrome|Firefox|Safari|Edge)/)?.[0] || 'unknown') : 'unknown'
                 },
                 location: geoip.lookup(ip) || {},
                 targetDetails,
-                metadata: { via: targetDetails.via || 'unknown' } // Chỉ giữ via trong metadata
+                metadata: { via: targetDetails.via || 'unknown' }
             };
 
             if (req.actor) {
@@ -511,22 +541,34 @@ const trackView = (targetType) => async (req, res, next) => {
                     type: req.actor.type === 'shop' ? 'Shop' : 'User',
                     _id: req.actor._id
                 };
+                console.log(`👤 Logged in ${req.actor.type}: ${req.actor._id}`);
+            } else {
+                console.log(`👤 Anonymous user`);
             }
 
-            console.log(`Recording view for ${targetType} with ID ${targetId}, targetDetails:`, targetDetails);
-            await UserInteraction.create(interaction);
+            console.log(`💾 Recording view for ${targetType} with ID ${targetId}`);
+            console.log(`💾 Target details:`, targetDetails);
+
+            // await UserInteraction.create(interaction);
+            await UserInteraction.recordInteraction(interaction);
+            console.log(`✅ Successfully tracked view for ${targetType} ID: ${targetId}`);
         } else {
-            console.log(`No targetId found for ${targetType}`);
+            console.log(`❌ No targetId found for ${targetType} - skipping tracking`);
         }
+
         return next();
     } catch (err) {
-        console.error('Error tracking view:', err);
+        console.error(`❌ Error in trackView middleware for ${targetType}:`, err);
+        console.error(`❌ Error stack:`, err.stack);
+        console.error(`❌ Request params:`, req.params);
+        console.error(`❌ Request path:`, req.path);
+        // Continue to next middleware even if tracking fails
         next();
     }
 };
 
 // Hàm trích xuất metadata từ entity
-const extractMetadata = (targetType, entity) => {
+const extractMetadata = async (targetType, entity) => {
     const metadata = { via: entity.slug ? 'slug' : entity._id ? 'id' : 'unknown' };
     if (targetType === 'product') {
         return {
@@ -541,24 +583,45 @@ const extractMetadata = (targetType, entity) => {
             variants: entity.variants ? entity.variants.map(v => ({ name: v.name, options: v.options })) : [],
             via: metadata.via
         };
-    } else if (targetType === 'shop') {
-        return {
-            name: entity.name,
-            category: entity.productInfo?.mainCategory?.name || null,
-            subCategories: entity.productInfo?.subCategories?.map(s => s.name) || [],
-            hashtags: entity.hashtags?.map(h => h.toLowerCase()) || [],
-            rating: entity.stats?.rating?.avg || 0,
-            phone: entity.contact?.phone,
-            via: metadata.via
-        };
-    } else if (targetType === 'user') {
-        return {
-            name: entity.fullName,
-            roles: entity.roles || [],
-            followersCount: entity.followers?.length || 0,
-            followingCount: entity.following?.length || 0,
-            via: metadata.via
-        };
+    } else if (targetType === 'user' || targetType === 'shop') { // Nếu là user hoặc shop — xử lý follower count
+        const isUser = targetType === 'user';
+        const targetId = entity._id;
+
+        const [followersCount, followingCount] = await Promise.all([
+            UserInteraction.countDocuments({
+                action: 'follow',
+                targetType,
+                targetId
+            }),
+            UserInteraction.countDocuments({
+                action: 'follow',
+                'author.type': isUser ? 'User' : 'Shop',
+                'author._id': targetId
+            })
+        ]);
+
+        // Gộp các thuộc tính tuỳ theo loại entity
+        if (isUser) {
+            return {
+                name: entity.fullName,
+                roles: entity.roles || [],
+                followersCount,
+                followingCount,
+                via: metadata.via
+            };
+        } else {
+            return {
+                name: entity.name,
+                category: entity.productInfo?.mainCategory?.name || null,
+                subCategories: entity.productInfo?.subCategories?.map(s => s.name) || [],
+                hashtags: entity.hashtags?.map(h => h.toLowerCase()) || [],
+                rating: entity.stats?.rating?.avg || 0,
+                phone: entity.contact?.phone || null,
+                followersCount,
+                followingCount,
+                via: metadata.via
+            };
+        }
     } else if (targetType === 'post') {
         return {
             content: entity.content.substring(0, 50), // Cắt ngắn để tiết kiệm không gian

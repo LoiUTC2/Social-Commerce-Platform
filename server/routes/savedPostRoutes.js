@@ -2,35 +2,16 @@ const express = require('express');
 const router = express.Router();
 const savedPostController = require('../controllers/savedPostController');
 const { verifyToken, setActor, ensureSessionId } = require('../middlewares/authMiddleware');
-const { trackInteraction } = require('../middlewares/interactionMiddleware');
 
-router.post(
-    '/:postId',
-    verifyToken,
-    setActor,
-    ensureSessionId,
-    savedPostController.savePost
-);
-router.delete(
-    '/:postId',
-    verifyToken,
-    setActor,
-    ensureSessionId,
-    savedPostController.unsavePost
-);
+const middlewares = [verifyToken, setActor, ensureSessionId];
 
-router.get(
-    '/',
-    verifyToken,
-    setActor,
-    savedPostController.getSavedPosts
-);
+// Toggle save/unsave bài viết
+router.post('/toggle/:postId', ...middlewares, savedPostController.toggleSavePost);
 
-router.get(
-    '/check/:postId',
-    verifyToken,
-    setActor,
-    savedPostController.checkSavedPost
-);
+// Lấy danh sách bài viết đã lưu
+router.get('/', verifyToken, setActor, savedPostController.getSavedPosts);
+
+// Kiểm tra xem bài viết đã được lưu chưa
+router.get('/check/:postId', verifyToken, setActor, savedPostController.checkSavedPost);
 
 module.exports = router;

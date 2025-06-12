@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { Send } from 'lucide-react';
 
-const MessageInput = () => {
+const MessageInput = ({handleSend}) => {
   const [message, setMessage] = useState('');
 
-  const handleSend = () => {
-    if (message.trim()) {
-      console.log('Send:', message);
-      setMessage('');
-    }
-  };
+  // const handleSend = () => {
+  //   if (message.trim()) {
+  //     console.log('Send:', message);
+  //     setMessage('');
+  //   }
+  // };
 
   return (
     <div className="p-4 border-t flex items-center gap-3 bg-white">

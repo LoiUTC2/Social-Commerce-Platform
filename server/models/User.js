@@ -17,8 +17,6 @@ const userSchema = new mongoose.Schema({
   // isSellerActive: { type: Boolean, default: false }, // đã bật chế độ bán hàng chưa
   shopId: { type: mongoose.Schema.Types.ObjectId, ref: 'Shop', unique: true }, // liên kết đến shop nếu là seller, khi đăng kí shop thì sẽ có shopId ngay
   sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', unique: true }, // Liên kết với Seller (1-1)
-  followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   savedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
   likedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
   likedComments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Comment' }],
