@@ -51,6 +51,12 @@ export const getSuggestedProducts = async (page = 1, limit = 20) => {
     return res.data;
 };
 
+// Lấy danh sách sản phẩm gợi ý (dựa trên hành vi)
+export const getLatestProducts = async (page = 1, limit = 20) => {
+    const res = await api.get(`/products/latest?page=${page}&limit=${limit}`);
+    return res.data;
+};
+
 // Lấy danh sách sản phẩm theo shop cho người dùng (sàn TMĐT)
 export const getProductsByShopForUser = async (sellerId, page = 1, limit = 20, sort = 'newest') => {
     const res = await api.get(`/products/getAllForUser/${sellerId}?page=${page}&limit=${limit}&sort=${sort}`);

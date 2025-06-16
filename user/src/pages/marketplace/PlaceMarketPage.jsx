@@ -13,7 +13,6 @@ const PlaceMarketPage = () => {
       <MarketplaceCategory />
       <FlashSale />
       <TopShops />
-      <DailySuggestions />
       <section>
         <h2 className="text-lg font-semibold mb-4 text-gray-800">🛒 Sản phẩm nổi bật</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -22,6 +21,7 @@ const PlaceMarketPage = () => {
           ))}
         </div>
       </section>
+      <DailySuggestions />
     </main>
   );
 };

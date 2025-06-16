@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const savedPostController = require('../controllers/savedPostController');
-const { verifyToken, setActor, ensureSessionId } = require('../middlewares/authMiddleware');
+const { verifyToken, setActor } = require('../middleware/authMiddleware');
 
-const middlewares = [verifyToken, setActor, ensureSessionId];
+const middlewares = [verifyToken, setActor];
 
 // Toggle save/unsave bài viết
 router.post('/toggle/:postId', ...middlewares, savedPostController.toggleSavePost);

@@ -1,13 +1,13 @@
 const mongoose = require('mongoose');
 
 const savedPostSchema = new mongoose.Schema({
-  author: {
+  user: {
     type: {
       type: String,
       enum: ['User', 'Shop'],
       required: true
     },
-    _id: { type: mongoose.Schema.Types.ObjectId, required: true, refPath: 'author.type' } //refPath: 'author.type' cho phép Mongoose populate linh hoạt theo kiểu (User hoặc Shop).
+    _id: { type: mongoose.Schema.Types.ObjectId, required: true, refPath: 'user.type' }
   },
   post: { type: mongoose.Schema.Types.ObjectId, ref: 'Post', required: true },
   savedAt: { type: Date, default: Date.now }

@@ -6,6 +6,8 @@ const { trackView } = require('../middleware/interactionMiddleware');
 
 // Thêm sản phẩm
 router.post('/', verifyToken, setActor, requireRole(['seller', 'admin']), productController.createProduct);
+// router.post('/', productController.createProduct); //Dùng để tạo dữ liệu ảo bằng runder postman
+
 
 // Cập nhật sản phẩm
 router.put('/:slug', verifyToken, setActor, requireRole(['seller', 'admin']), checkProductOwnership, productController.updateProduct);
@@ -27,6 +29,9 @@ router.get('/featured', productController.getFeaturedProducts);
 
 // Lấy danh sách sản phẩm gợi ý
 router.get('/suggested', verifyToken, setActor, productController.getSuggestedProducts);
+
+// Lấy danh sách sản phẩm mới nhất
+router.get('/latest', productController.getLatestProducts);
 
 // Lấy tất cả sản phẩm của shop (cho user)
 router.get('/getAllForUser/:seller', productController.getProductsByShopForUser);

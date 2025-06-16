@@ -312,19 +312,19 @@ const SearchPage = () => {
 
     // Event handlers for card interactions
     const handleProductClick = (product) => {
-        navigate(`/products/${product._id}`)
+        navigate(`/marketplace/products/${product.slug}`)
     }
 
     const handleShopClick = (shop) => {
-        navigate(`/shops/${shop._id}`)
+        navigate(`/feed/profile/${shop.slug}`)
     }
 
     const handleUserClick = (user) => {
-        navigate(`/users/${user._id}`)
+        navigate(`/feed/profile/${user.slug}`)
     }
 
     const handlePostClick = (post) => {
-        navigate(`/posts/${post._id}`)
+        navigate(`/feed/post/${post._id}`)
     }
 
     const handlePostLike = (post) => {

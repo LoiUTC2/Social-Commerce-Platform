@@ -69,6 +69,79 @@ exports.toggleFollow = async (req, res) => {
     }
 };
 
+// Kiểm tra trạng thái follow của một target
+exports.checkFollowStatus = async (req, res) => {
+    try {
+        const actor = req.actor;
+        const { targetId, targetType } = req.params;
+
+        if (!actor) {
+            return successResponse(res, 'Trạng thái follow', {
+                isFollowing: false
+            });
+        }
+
+        if (!targetId || !targetType) {
+            return errorResponse(res, 'Thiếu targetId hoặc targetType', 400);
+        }
+
+        if (!['user', 'shop'].includes(targetType)) {
+            return errorResponse(res, 'Loại đối tượng không hợp lệ', 400);
+        }
+
+        const authorType = actor.type === 'shop' ? 'Shop' : 'User';
+
+        const isFollowing = await UserInteraction.exists({
+            'author._id': actor._id,
+            'author.type': authorType,
+            targetId,
+            targetType,
+            action: 'follow'
+        });
+
+        return successResponse(res, 'Trạng thái follow', {
+            isFollowing: !!isFollowing
+        });
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi kiểm tra trạng thái follow', 500, err.message);
+    }
+};
+
+// Kiểm tra trạng thái follow của nhiều targets (batch check)
+exports.batchCheckFollowStatus = async (req, res) => {
+    try {
+        const actor = req.actor;
+        const { targets } = req.body; // Array of {targetId, targetType}
+
+        if (!actor) {
+            const result = targets.reduce((acc, target) => {
+                acc[`${target.targetId}_${target.targetType}`] = false;
+                return acc;
+            }, {});
+            return successResponse(res, 'Trạng thái follow batch', result);
+        }
+
+        const authorType = actor.type === 'shop' ? 'Shop' : 'User';
+        const result = {};
+
+        for (const target of targets) {
+            const isFollowing = await UserInteraction.exists({
+                'author._id': actor._id,
+                'author.type': authorType,
+                targetId: target.targetId,
+                targetType: target.targetType,
+                action: 'follow'
+            });
+            
+            result[`${target.targetId}_${target.targetType}`] = !!isFollowing;
+        }
+
+        return successResponse(res, 'Trạng thái follow batch', result);
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi kiểm tra trạng thái follow batch', 500, err.message);
+    }
+};
+
 // Giả định viewer có trong req.actor
 exports.getFollowList = async (req, res) => {
     try {

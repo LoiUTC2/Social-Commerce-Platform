@@ -34,27 +34,70 @@ async function prepareUserEntityMatrix() {
     }
 
     // Tạo danh sách user và entity duy nhất
-    const users = [...new Set(interactions.map(i => i.author?._id?.toString() || i.sessionId))];
-    // const entities = [...new Set(interactions.map(i => ({ id: i.targetId?.toString(), type: i.targetType })))].map(e => `${e.type}:${e.id}`);
+    const users = [...new Set(interactions.map(i => i.author?._id?.toString() || i.sessionId))].sort();
+    console.log(`🔍 DEBUG: Users list: ${users.join(', ')}`);
+
+    // Sửa lỗi: Lọc bỏ các entity không hợp lệ
     const entities = [...new Set(interactions.map(i => {
         if (i.targetType === 'search') {
-            // ✅ Comment mới: Sử dụng searchSignature làm entityId cho tìm kiếm
-            return `search:${i.searchSignature.query || 'unknown'}:${i.searchSignature.category || 'unknown'}:${(i.searchSignature.hashtags || []).join('|')}`;
+            // Kiểm tra searchSignature tồn tại trước khi truy cập thuộc tính
+            if (i.searchSignature && typeof i.searchSignature === 'object') {
+                const query = i.searchSignature.query || 'unknown';
+                const category = i.searchSignature.category || 'unknown';
+                const hashtags = Array.isArray(i.searchSignature.hashtags) ? i.searchSignature.hashtags.join('|') : '';
+                return `search:${query}:${category}:${hashtags}`;
+            } else {
+                // Fallback nếu searchSignature không tồn tại hoặc không hợp lệ
+                return `search:unknown:unknown:`;
+            }
         }
-        return `${i.targetType}:${i.targetId?.toString()}`;
-    }))];
+
+        // Kiểm tra targetId có tồn tại và hợp lệ
+        if (!i.targetId) {
+            console.warn(`⚠️ targetId không tồn tại cho interaction:`, i._id);
+            return null;
+        }
+
+        const targetIdStr = i.targetId.toString();
+        // Kiểm tra định dạng ObjectId (24 ký tự hex) cho các loại không phải search
+        if (!/^[0-9a-fA-F]{24}$/.test(targetIdStr)) {
+            console.warn(`⚠️ targetId không đúng định dạng ObjectId: ${targetIdStr}`);
+            return null;
+        }
+
+        return `${i.targetType}:${targetIdStr}`;
+    }).filter(entity => entity !== null))]; // Loại bỏ các entity null
+
+    console.log(`📊 Filtered entities: ${entities.length} valid entities from ${interactions.length} interactions`);
 
     // Tạo ma trận user-entity
     const matrix = Array(users.length).fill().map(() => Array(entities.length).fill(0));
+
     interactions.forEach(interaction => {
         const userIdx = users.indexOf(interaction.author?._id?.toString() || interaction.sessionId);
-        const entityIdx = entities.indexOf(
-            interaction.targetType === 'search'
-                ? `search:${interaction.searchSignature.query || 'unknown'}:${interaction.searchSignature.category || 'unknown'}:${(interaction.searchSignature.hashtags || []).join('|')}`
-                : `${interaction.targetType}:${interaction.targetId?.toString()}`
-        );
+
+        let entityKey;
+        if (interaction.targetType === 'search') {
+            if (interaction.searchSignature && typeof interaction.searchSignature === 'object') {
+                const query = interaction.searchSignature.query || 'unknown';
+                const category = interaction.searchSignature.category || 'unknown';
+                const hashtags = Array.isArray(interaction.searchSignature.hashtags) ? interaction.searchSignature.hashtags.join('|') : '';
+                entityKey = `search:${query}:${category}:${hashtags}`;
+            } else {
+                entityKey = `search:unknown:unknown:`;
+            }
+        } else {
+            // Kiểm tra targetId trước khi sử dụng
+            if (!interaction.targetId) {
+                return; // Bỏ qua interaction này
+            }
+            entityKey = `${interaction.targetType}:${interaction.targetId.toString()}`;
+        }
+
+        const entityIdx = entities.indexOf(entityKey);
+
         if (userIdx !== -1 && entityIdx !== -1) {
-            //Sử dụng weight trực tiếp, giữ nguyên giá trị âm cho hành vi tiêu cực
+            // Sử dụng weight trực tiếp, giữ nguyên giá trị âm cho hành vi tiêu cực
             matrix[userIdx][entityIdx] = interaction.weight || 0;
 
             // Loại bỏ các hành vi tiêu cực (unfollow, unsave, v.v.) nếu không mong muốn ảnh hưởng đến ma trận
@@ -64,6 +107,7 @@ async function prepareUserEntityMatrix() {
         }
     });
 
+    console.log(`📊 Đã tạo ma trận ${users.length} users x ${entities.length} entities`);
     return { matrix, users, entities };
 }
 
@@ -102,6 +146,8 @@ async function trainUserShopModel() {
 
     if (trainData.length === 0) {
         console.warn('⚠️ Không có dữ liệu training');
+        userEmbedding.dispose();
+        entityEmbedding.dispose();
         return null;
     }
 
@@ -111,7 +157,7 @@ async function trainUserShopModel() {
     // Huấn luyện
     for (let epoch = 0; epoch < 50; epoch++) {
         let totalLoss = 0;
-        const shuffledData = [...trainData].sort(() => Math.random() - 0.5); // Shuffle đơn giản
+        const shuffledData = [...trainData].sort(() => Math.random() - 0.5);
 
         for (let idx = 0; idx < shuffledData.length; idx++) {
             const sample = shuffledData[idx];
@@ -147,12 +193,18 @@ async function trainUserShopModel() {
         }
     }
 
+    // Lấy data từ tensor trước khi dispose
+    const userEmbeddingData = await userEmbedding.data();
+    const entityEmbeddingData = await entityEmbedding.data();
+    const userEmbeddingShape = userEmbedding.shape;
+    const entityEmbeddingShape = entityEmbedding.shape;
+
     // Lưu model
     const modelData = {
-        userEmbedding: await userEmbedding.data(),
-        entityEmbedding: await entityEmbedding.data(),
-        userEmbeddingShape: userEmbedding.shape,
-        entityEmbeddingShape: entityEmbedding.shape,
+        userEmbedding: userEmbeddingData,
+        entityEmbedding: entityEmbeddingData,
+        userEmbeddingShape: userEmbeddingShape,
+        entityEmbeddingShape: entityEmbeddingShape,
         users,
         entities,
         numUsers,
@@ -173,7 +225,19 @@ async function trainUserShopModel() {
         console.error('❌ Lỗi khi lưu mô hình User/Shop:', error);
     }
 
-    return modelData; // Trả về trực tiếp để dùng trong API
+    // Cleanup tensors sau khi lấy data
+    userEmbedding.dispose();
+    entityEmbedding.dispose();
+    optimizer.dispose();
+
+    // Trả về object với tensor mới được tạo từ data đã lưu
+    return {
+        userEmbedding: tf.tensor(Array.from(userEmbeddingData), userEmbeddingShape),
+        entityEmbedding: tf.tensor(Array.from(entityEmbeddingData), entityEmbeddingShape),
+        users,
+        entities,
+        numFactors
+    };
 }
 
 // Thêm hàm load mô hình User-Shop
@@ -182,117 +246,563 @@ async function loadUserShopModel() {
     try {
         const modelDataStr = await fs.readFile(modelPath, 'utf8');
         const modelData = JSON.parse(modelDataStr);
+
+        console.log('🔍 Debug model data:', {
+            hasUserEmbedding: !!modelData.userEmbedding,
+            hasEntityEmbedding: !!modelData.entityEmbedding,
+            userEmbeddingLength: modelData.userEmbedding ? modelData.userEmbedding.length : 0,
+            entityEmbeddingLength: modelData.entityEmbedding ? modelData.entityEmbedding.length : 0,
+            userEmbeddingShape: modelData.userEmbeddingShape,
+            entityEmbeddingShape: modelData.entityEmbeddingShape,
+            usersCount: modelData.users?.length || 0,
+            entitiesCount: modelData.entities?.length || 0
+        });
+
+        // Kiểm tra dữ liệu model
+        if (!modelData.userEmbedding || !modelData.entityEmbedding) {
+            console.error('❌ Model data thiếu embedding data');
+            return await trainUserShopModel();
+        }
+
+        if (!modelData.userEmbeddingShape || !modelData.entityEmbeddingShape) {
+            console.error('❌ Model data thiếu shape information');
+            return await trainUserShopModel();
+        }
+
+        // Kiểm tra userEmbedding data
+        if (!Array.isArray(modelData.userEmbedding) || modelData.userEmbedding.length === 0) {
+            console.error('❌ userEmbedding data không hợp lệ hoặc rỗng');
+            return await trainUserShopModel();
+        }
+
+        if (!Array.isArray(modelData.entityEmbedding) || modelData.entityEmbedding.length === 0) {
+            console.error('❌ entityEmbedding data không hợp lệ hoặc rỗng');
+            return await trainUserShopModel();
+        }
+
+        console.log('🔍 Loading model with shapes:', {
+            userEmbeddingShape: modelData.userEmbeddingShape,
+            entityEmbeddingShape: modelData.entityEmbeddingShape,
+            usersCount: modelData.users?.length || 0,
+            entitiesCount: modelData.entities?.length || 0
+        });
+
+        // Tạo tensor từ dữ liệu đã lưu
+        let userEmbedding, entityEmbedding;
+
+        try {
+            // Kiểm tra shape có khớp với dữ liệu không
+            const expectedUserSize = modelData.userEmbeddingShape[0] * modelData.userEmbeddingShape[1];
+            const expectedEntitySize = modelData.entityEmbeddingShape[0] * modelData.entityEmbeddingShape[1];
+
+            if (modelData.userEmbedding.length !== expectedUserSize) {
+                console.error(`❌ userEmbedding size không khớp: expected ${expectedUserSize}, got ${modelData.userEmbedding.length}`);
+                return await trainUserShopModel();
+            }
+
+            if (modelData.entityEmbedding.length !== expectedEntitySize) {
+                console.error(`❌ entityEmbedding size không khớp: expected ${expectedEntitySize}, got ${modelData.entityEmbedding.length}`);
+                return await trainUserShopModel();
+            }
+
+            userEmbedding = tf.tensor(
+                Array.from(modelData.userEmbedding),
+                modelData.userEmbeddingShape
+            );
+            entityEmbedding = tf.tensor(
+                Array.from(modelData.entityEmbedding),
+                modelData.entityEmbeddingShape
+            );
+
+            // Kiểm tra tensor đã được tạo đúng chưa
+            if (!userEmbedding.shape || !entityEmbedding.shape) {
+                throw new Error('Tensor shape is undefined after creation');
+            }
+
+            console.log('✅ Tensors created successfully:', {
+                userEmbeddingShape: userEmbedding.shape,
+                entityEmbeddingShape: entityEmbedding.shape
+            });
+
+        } catch (tensorError) {
+            console.error('❌ Lỗi khi tạo tensor:', tensorError);
+            // Cleanup nếu có lỗi
+            if (userEmbedding) userEmbedding.dispose();
+            if (entityEmbedding) entityEmbedding.dispose();
+            return await trainUserShopModel();
+        }
+
         return {
-            userEmbedding: tf.tensor(Array.from(modelData.userEmbedding), modelData.userEmbeddingShape),
-            entityEmbedding: tf.tensor(Array.from(modelData.entityEmbedding), modelData.entityEmbeddingShape),
-            users: modelData.users,
-            entities: modelData.entities,
-            numFactors: modelData.numFactors
+            userEmbedding,
+            entityEmbedding,
+            users: modelData.users || [],
+            entities: modelData.entities || [],
+            numFactors: modelData.numFactors || 50
         };
     } catch (error) {
-        console.log('⚠️ Không thể load mô hình User/Shop, sẽ huấn luyện mới');
+        console.log('⚠️ Không thể load mô hình User/Shop, sẽ huấn luyện mới:', error.message);
         return await trainUserShopModel();
     }
 }
 
-// Thêm hàm gợi ý User/Shop
-async function getUserShopRecommendations(userId, sessionId, limit = 10, entityType = 'all', role = 'user') {
+// gợi ý User/Shop, hỗ trợ phân trang, error handling và timeout tốt hơn
+async function getUserShopRecommendations(userId, sessionId, limit = 10, entityType = 'all', role = 'user', options = {}) {
+    console.log('🚀 Starting getUserShopRecommendations:', { userId, sessionId, limit, entityType, role, options });
+
+    // Thêm options để hỗ trợ các tính năng mở rộng
+    const {
+        enableCache = true,
+        cacheTimeout = 1800, // 30 phút
+        includeInactive = false, // Có bao gồm user/shop không active không
+        sortBy = 'score', // 'score', 'followers', 'created', 'random'
+        minScore = 0 // Điểm tối thiểu để lọc
+    } = options;
+
+    // Timeout cho toàn bộ function
+    const FUNCTION_TIMEOUT = 25000; // 25 giây
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Function timeout - getUserShopRecommendations')), FUNCTION_TIMEOUT);
+    });
+
     try {
-        const model = await loadUserShopModel();
-        if (!model) {
-            console.warn('⚠️ Không có mô hình User/Shop để thực hiện recommendation');
-            return [];
-        }
-
-        const { userEmbedding, entityEmbedding, users, entities } = model;
-        const userIdx = users.indexOf(userId || sessionId);
-
-        if (userIdx === -1) {
-            console.log(`⚠️ Không tìm thấy user ${userId || sessionId} trong mô hình`);
-            return [];
-        }
-
-        const userVec = userEmbedding.slice([userIdx, 0], [1, userEmbedding.shape[1]]);
-        const scores = tf.matMul(userVec, entityEmbedding, false, true).squeeze();
-        const scoresArray = await scores.data();
-
-        const entityScores = entities.map((entityId, idx) => ({
-            entityId,
-            score: scoresArray[idx]
-        }));
-
-        // Lọc theo loại (user/shop) và điều chỉnh theo vai trò
-        let filteredEntities = entityScores;
-        if (entityType === 'user') {
-            const usersList = await User.find({ _id: { $in: entities } }).select('_id');
-            filteredEntities = entityScores.filter(e => usersList.some(u => u._id.toString() === e.entityId));
-            if (role === 'shop') {
-                // Shop ưu tiên user có hành vi mua sắm
-                const validEntities = await Promise.all(filteredEntities.map(async e => {
-                    const interactions = await UserInteraction.find({
-                        targetId: e.entityId,
-                        action: { $in: ['purchase', 'add_to_cart'] }
-                    }).lean();
-                    return interactions.length > 0 ? e : null;
-                }));
-                filteredEntities = validEntities.filter(e => e !== null);
+        const mainProcess = async () => {
+            // 1. Kiểm tra cache trước (nếu enable)
+            if (enableCache) {
+                const cacheKey = `user_shop_recs:${userId || sessionId}:${entityType}:${role}:${limit}:${sortBy}:${minScore}`;
+                try {
+                    const cached = await redisClient.get(cacheKey);
+                    if (cached) {
+                        console.log('✅ Lấy từ cache thành công');
+                        const result = JSON.parse(cached);
+                        return result.slice(0, limit); // Đảm bảo limit chính xác
+                    }
+                } catch (cacheError) {
+                    console.warn('⚠️ Lỗi cache, tiếp tục xử lý:', cacheError.message);
+                }
             }
-        } else if (entityType === 'shop') {
-            const shopsList = await Shop.find({ _id: { $in: entities } }).select('_id');
-            filteredEntities = entityScores.filter(e => shopsList.some(s => s._id.toString() === e.entityId));
-            if (role === 'user') {
-                // User ưu tiên shop có sản phẩm tương tác
-                const validEntities = await Promise.all(filteredEntities.map(async e => {
-                    const interactions = await UserInteraction.find({
-                        targetId: e.entityId,
-                        action: { $in: ['view', 'like', 'purchase'] }
-                    }).lean();
-                    return interactions.length > 0 ? e : null;
-                }));
-                filteredEntities = validEntities.filter(e => e !== null);
+
+            // 2. Load model với timeout
+            console.log('🔄 Loading model...');
+            const MODEL_TIMEOUT = 15000; // 15 giây cho load model
+            const modelTimeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Model loading timeout')), MODEL_TIMEOUT);
+            });
+
+            let model;
+            try {
+                model = await Promise.race([
+                    loadUserShopModel(),
+                    modelTimeoutPromise
+                ]);
+            } catch (modelError) {
+                console.error('❌ Lỗi load model:', modelError.message);
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
             }
-        }
 
-        const topEntities = filteredEntities
-            .sort((a, b) => b.score - a.score)
-            .slice(0, limit)
-            .map(e => e.entityId);
+            if (!model) {
+                console.warn('⚠️ Không có model, fallback');
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
 
-        userVec.dispose();
-        scores.dispose();
+            // 3. Validate model components
+            const { userEmbedding, entityEmbedding, users, entities } = model;
 
-        // Lấy thông tin chi tiết
-        let result = [];
-        if (entityType === 'user' || entityType === 'all') {
-            const users = await User.find({ _id: { $in: topEntities } })
-                .lean()
-                .then(users => users.map(u => {
-                    const count = UserInteraction.countDocuments({
-                        targetType: 'user',
-                        targetId: u._id,
-                        action: 'follow'
-                    }).then(count => ({ ...u, followersCount: count, type: 'user' }));
-                    return count;
-                }));
-            result = result.concat(await Promise.all(users));
-        }
-        if (entityType === 'shop' || entityType === 'all') {
-            const shops = await Shop.find({ _id: { $in: topEntities } })
-                .lean()
-                .then(shops => shops.map(s => {
-                    const count = UserInteraction.countDocuments({
-                        targetType: 'shop',
-                        targetId: s._id,
-                        action: 'follow'
-                    }).then(count => ({ ...s, followersCount: count, type: 'shop' }));
-                    return count;
-                }));
-            result = result.concat(await Promise.all(shops));
-        }
+            if (!userEmbedding || !entityEmbedding || !users || !entities) {
+                console.error('❌ Model components không hợp lệ');
+                if (userEmbedding) userEmbedding.dispose();
+                if (entityEmbedding) entityEmbedding.dispose();
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
 
-        return result;
+            if (!Array.isArray(users) || !Array.isArray(entities) || users.length === 0 || entities.length === 0) {
+                console.error('❌ Users hoặc entities không hợp lệ');
+                userEmbedding.dispose();
+                entityEmbedding.dispose();
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
+
+            // 4. Tìm user index
+            const userIdx = users.indexOf(userId || sessionId);
+            if (userIdx === -1) {
+                console.log(`⚠️ User ${userId || sessionId} không tồn tại trong model`);
+                userEmbedding.dispose();
+                entityEmbedding.dispose();
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
+
+            // 5. Validate tensor shapes và user index
+            if (!userEmbedding.shape || !entityEmbedding.shape) {
+                console.error('❌ Tensor shapes không hợp lệ');
+                userEmbedding.dispose();
+                entityEmbedding.dispose();
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
+
+            if (userIdx >= userEmbedding.shape[0]) {
+                console.error(`❌ userIdx ${userIdx} vượt quá embedding size ${userEmbedding.shape[0]}`);
+                userEmbedding.dispose();
+                entityEmbedding.dispose();
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
+
+            // 6. Thực hiện prediction với error handling
+            let userVec, scores, scoresArray;
+            try {
+                console.log('🔄 Computing predictions...');
+                const embeddingDim = userEmbedding.shape[1];
+
+                userVec = userEmbedding.slice([userIdx, 0], [1, embeddingDim]);
+                scores = tf.matMul(userVec, entityEmbedding, false, true).squeeze();
+
+                const dataTimeout = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Tensor data extraction timeout')), 5000);
+                });
+
+                scoresArray = await Promise.race([
+                    scores.data(),
+                    dataTimeout
+                ]);
+
+            } catch (predictionError) {
+                console.error('❌ Lỗi prediction:', predictionError.message);
+                if (userVec) userVec.dispose();
+                if (scores) scores.dispose();
+                userEmbedding.dispose();
+                entityEmbedding.dispose();
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
+
+            // 7. Process scores và filter entities
+            console.log('🔄 Processing scores...');
+            let filteredEntityScores = [];
+
+            try {
+                const entityScores = entities.map((entityId, idx) => ({
+                    entityId: entityId || '',
+                    score: scoresArray[idx] || 0
+                })).filter(item =>
+                    item.entityId &&
+                    typeof item.entityId === 'string' &&
+                    item.score >= minScore // Lọc theo điểm tối thiểu
+                );
+
+                // Filter theo entity type
+                if (entityType === 'user') {
+                    filteredEntityScores = entityScores.filter(e => e.entityId.startsWith('user:'));
+                } else if (entityType === 'shop') {
+                    filteredEntityScores = entityScores.filter(e => e.entityId.startsWith('shop:'));
+                } else {
+                    filteredEntityScores = entityScores.filter(e =>
+                        e.entityId.startsWith('user:') || e.entityId.startsWith('shop:')
+                    );
+                }
+
+                // Sort theo yêu cầu
+                if (sortBy === 'score') {
+                    filteredEntityScores.sort((a, b) => b.score - a.score);
+                } else if (sortBy === 'random') {
+                    filteredEntityScores.sort(() => Math.random() - 0.5);
+                }
+                // Các kiểu sort khác sẽ được xử lý trong fetchEntityDetailsWithTimeout
+
+                // Lấy nhiều hơn limit để có dự phòng
+                filteredEntityScores = filteredEntityScores.slice(0, Math.min(limit * 3, 100));
+
+            } catch (processingError) {
+                console.error('❌ Lỗi processing scores:', processingError.message);
+                filteredEntityScores = [];
+            }
+
+            // 8. Cleanup tensors ngay sau khi xử lý xong
+            try {
+                userVec.dispose();
+                scores.dispose();
+                userEmbedding.dispose();
+                entityEmbedding.dispose();
+            } catch (cleanupError) {
+                console.warn('⚠️ Lỗi cleanup tensors:', cleanupError.message);
+            }
+
+            // 9. Fetch detailed information với timeout và batch processing
+            console.log(`🔄 Fetching details for ${filteredEntityScores.length} entities...`);
+
+            if (filteredEntityScores.length === 0) {
+                console.log('⚠️ Không có entities để fetch, fallback');
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
+
+            const result = await fetchEntityDetailsWithTimeout(
+                filteredEntityScores,
+                limit,
+                { includeInactive, sortBy }
+            );
+
+            // 10. Cache result nếu có và enable cache
+            if (result.length > 0 && enableCache) {
+                try {
+                    const cacheKey = `user_shop_recs:${userId || sessionId}:${entityType}:${role}:${limit}:${sortBy}:${minScore}`;
+                    await redisClient.setex(cacheKey, cacheTimeout, JSON.stringify(result));
+                } catch (cacheError) {
+                    console.warn('⚠️ Không thể cache result:', cacheError.message);
+                }
+            }
+
+            console.log(`✅ Trả về ${result.length} recommendations`);
+            return result;
+        };
+
+        // Chạy main process với timeout
+        return await Promise.race([mainProcess(), timeoutPromise]);
+
     } catch (error) {
-        console.error('❌ Lỗi trong getUserShopRecommendations:', error);
+        console.error('❌ Lỗi getUserShopRecommendations:', error.message);
+        console.error('❌ Stack:', error.stack);
+
+        // Fallback cuối cùng
+        try {
+            return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+        } catch (fallbackError) {
+            console.error('❌ Fallback cũng lỗi:', fallbackError.message);
+            return [];
+        }
+    }
+}
+
+// Hàm helper: Fetch entity details với timeout và batch processing
+async function fetchEntityDetailsWithTimeout(entityScores, limit, options = {}) {
+    const { includeInactive = false, sortBy = 'score' } = options;
+    const FETCH_TIMEOUT = 8000; // 8 giây
+    const BATCH_SIZE = 5; // Xử lý 5 entities mỗi lần
+
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Fetch details timeout')), FETCH_TIMEOUT);
+    });
+
+    const fetchProcess = async () => {
+        const result = [];
+        const validEntities = entityScores.filter(entity => {
+            if (!entity.entityId || typeof entity.entityId !== 'string') return false;
+
+            const parts = entity.entityId.split(':');
+            if (parts.length !== 2) return false;
+
+            const [type, id] = parts;
+            return (type === 'user' || type === 'shop') &&
+                id &&
+                /^[0-9a-fA-F]{24}$/.test(id);
+        });
+
+        // Process in batches
+        for (let i = 0; i < validEntities.length && result.length < limit; i += BATCH_SIZE) {
+            const batch = validEntities.slice(i, i + BATCH_SIZE);
+
+            const batchPromises = batch.map(async (entity) => {
+                try {
+                    const [type, id] = entity.entityId.split(':');
+
+                    if (type === 'user') {
+                        const query = { _id: id };
+                        if (!includeInactive) {
+                            query.isActive = true;
+                        }
+
+                        const user = await User.findOne(query)
+                            .select('_id fullName avatar bio createdAt isActive')
+                            .lean()
+                            .maxTimeMS(2000);
+
+                        if (user) {
+                            let followersCount = 0;
+                            try {
+                                followersCount = await UserInteraction.countDocuments({
+                                    targetType: 'user',
+                                    targetId: id,
+                                    action: 'follow'
+                                }).maxTimeMS(1000);
+                            } catch (countError) {
+                                console.warn('⚠️ Không thể đếm followers cho user:', id);
+                            }
+
+                            return {
+                                ...user,
+                                followersCount,
+                                type: 'user',
+                                score: entity.score
+                            };
+                        }
+                    } else if (type === 'shop') {
+                        const query = { _id: id };
+                        if (!includeInactive) {
+                            query['status.isActive'] = true;
+                            query['status.isApprovedCreate'] = true;
+                        }
+
+                        const shop = await Shop.findOne(query)
+                            .select('_id name description avatar logo contact stats createdAt status')
+                            .lean()
+                            .maxTimeMS(2000);
+
+                        if (shop) {
+                            let followersCount = 0;
+                            try {
+                                followersCount = await UserInteraction.countDocuments({
+                                    targetType: 'shop',
+                                    targetId: id,
+                                    action: 'follow'
+                                }).maxTimeMS(1000);
+                            } catch (countError) {
+                                console.warn('⚠️ Không thể đếm followers cho shop:', id);
+                            }
+
+                            return {
+                                ...shop,
+                                followersCount,
+                                type: 'shop',
+                                score: entity.score
+                            };
+                        }
+                    }
+                } catch (entityError) {
+                    console.warn(`⚠️ Lỗi fetch entity ${entity.entityId}:`, entityError.message);
+                }
+                return null;
+            });
+
+            try {
+                const batchResults = await Promise.allSettled(batchPromises);
+                const validResults = batchResults
+                    .filter(r => r.status === 'fulfilled' && r.value)
+                    .map(r => r.value);
+
+                result.push(...validResults);
+            } catch (batchError) {
+                console.warn('⚠️ Lỗi batch processing:', batchError.message);
+            }
+
+            if (result.length >= limit) break;
+        }
+
+        // Sort final results if needed
+        if (sortBy === 'followers') {
+            result.sort((a, b) => b.followersCount - a.followersCount);
+        } else if (sortBy === 'created') {
+            result.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        }
+
+        return result.slice(0, limit);
+    };
+
+    try {
+        return await Promise.race([fetchProcess(), timeoutPromise]);
+    } catch (error) {
+        console.warn('⚠️ Fetch details bị timeout, trả về empty array');
+        return [];
+    }
+}
+
+// Hàm fallback: Lấy shops/users phổ biến
+async function getPopularShopsFallback(limit = 10, entityType = 'all', options = {}) {
+    const { includeInactive = false, sortBy = 'score' } = options;
+    console.log('🔄 Executing popular shops fallback...');
+
+    try {
+        const result = [];
+        const halfLimit = Math.ceil(limit / 2);
+
+        if (entityType === 'shop') {
+            const query = {};
+            if (!includeInactive) {
+                query['status.isActive'] = true;
+                query['status.isApprovedCreate'] = true;
+            }
+
+            let sort = {};
+            if (sortBy === 'followers') {
+                sort = { 'stats.followers': -1 };
+            } else if (sortBy === 'created') {
+                sort = { createdAt: -1 };
+            } else {
+                sort = { 'stats.followers': -1, 'stats.orderCount': -1 };
+            }
+
+            const shops = await Shop.find(query)
+                .select('_id name description avatar logo contact stats createdAt status')
+                .sort(sort)
+                .limit(limit)
+                .lean()
+                .maxTimeMS(3000);
+
+            return shops.map(shop => ({
+                ...shop,
+                type: 'shop',
+                followersCount: shop.stats?.followers?.length || 0
+            }));
+        }
+
+        if (entityType === 'user') {
+            const query = {};
+            if (!includeInactive) {
+                query.isActive = true;
+            }
+
+            let sort = {};
+            if (sortBy === 'created') {
+                sort = { createdAt: -1 };
+            } else {
+                sort = { createdAt: -1 };
+            }
+
+            const users = await User.find(query)
+                .select('_id fullName avatar bio createdAt isActive')
+                .sort(sort)
+                .limit(limit)
+                .lean()
+                .maxTimeMS(3000);
+
+            return users.map(user => ({ ...user, type: 'user', followersCount: 0 }));
+        }
+
+        // entityType === 'all'
+        const [shops, users] = await Promise.allSettled([
+            Shop.find(includeInactive ? {} : {
+                'status.isActive': true,
+                'status.isApprovedCreate': true
+            })
+                .select('_id name description avatar logo contact stats createdAt status')
+                .sort({ 'stats.followers': -1 })
+                .limit(halfLimit)
+                .lean()
+                .maxTimeMS(2000),
+
+            User.find(includeInactive ? {} : { isActive: true })
+                .select('_id fullName avatar bio createdAt isActive')
+                .sort({ createdAt: -1 })
+                .limit(halfLimit)
+                .lean()
+                .maxTimeMS(2000)
+        ]);
+
+        if (shops.status === 'fulfilled') {
+            result.push(...shops.value.map(shop => ({
+                ...shop,
+                type: 'shop',
+                followersCount: shop.stats?.followers?.length || 0
+            })));
+        }
+
+        if (users.status === 'fulfilled') {
+            result.push(...users.value.map(user => ({
+                ...user,
+                type: 'user',
+                followersCount: 0
+            })));
+        }
+
+        console.log(`✅ Fallback trả về ${result.length} items`);
+        return result.slice(0, limit);
+
+    } catch (fallbackError) {
+        console.error('❌ Lỗi trong fallback:', fallbackError.message);
         return [];
     }
 }
@@ -311,7 +821,7 @@ async function trainMatrixFactorization() {
 
     const numUsers = users.length;
     const numEntities = entities.length;
-    const numFactors = Math.min(50, Math.min(numUsers, numEntities));
+    const numFactors = Math.min(20, Math.min(numUsers, numEntities)); // Giảm từ 50 xuống 20
 
     console.log(`🎯 Bắt đầu huấn luyện với ${numUsers} users, ${numEntities} entities, ${numFactors} factors`);
 
@@ -336,65 +846,76 @@ async function trainMatrixFactorization() {
         return null;
     }
 
-    // Kiểm tra dữ liệu training
-    console.log('🔍 Sample đầu tiên:', trainData[0]);
-    console.log('🔍 Kiểu dữ liệu trainData:', typeof trainData, Array.isArray(trainData));
+    // Optimizer với learning rate cao hơn để converge nhanh
+    const optimizer = tf.train.adam(0.05); // Tăng từ 0.01 lên 0.05
 
-    // Optimizer
-    const optimizer = tf.train.adam(0.01);
+    // Giảm số epoch để tránh timeout
+    const maxEpochs = Math.min(20, Math.max(10, Math.ceil(100 / trainData.length))); // Tối đa 20 epochs
+    console.log(`🔄 Sử dụng ${maxEpochs} epochs`);
 
     // Huấn luyện
-    for (let epoch = 0; epoch < 50; epoch++) {
+    for (let epoch = 0; epoch < maxEpochs; epoch++) {
         let totalLoss = 0;
 
-        // const shuffledData = [...trainData].sort(() => Math.random() - 0.5);
-
-        // Shuffle training data using Fisher-Yates algorithm
-        const shuffledData = [];
-        for (let i = 0; i < trainData.length; i++) {
-            shuffledData.push(trainData[i]);
-        }
-
-        // Fisher-Yates shuffle
+        // Fisher-Yates shuffle - tối ưu hóa
+        const shuffledData = [...trainData];
         for (let i = shuffledData.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
-            const temp = shuffledData[i];
-            shuffledData[i] = shuffledData[j];
-            shuffledData[j] = temp;
+            [shuffledData[i], shuffledData[j]] = [shuffledData[j], shuffledData[i]];
         }
 
-        // Training loop
-        for (let idx = 0; idx < shuffledData.length; idx++) {
-            const sample = shuffledData[idx];
+        // Training loop với batch processing
+        const batchSize = Math.min(16, trainData.length); // Batch processing
+        for (let batchStart = 0; batchStart < shuffledData.length; batchStart += batchSize) {
+            const batchEnd = Math.min(batchStart + batchSize, shuffledData.length);
+            const batch = shuffledData.slice(batchStart, batchEnd);
+
             try {
-                const lossValue = tf.tidy(() => {
-                    const userVec = userEmbedding.slice([sample.userIdx, 0], [1, numFactors]);
-                    const entityVec = entityEmbedding.slice([sample.entityIdx, 0], [1, numFactors]);
-                    const prediction = tf.matMul(userVec, entityVec, false, true).squeeze();
-                    const label = tf.scalar(sample.rating);
-                    const loss = tf.losses.meanSquaredError(label, prediction);
-                    return loss.dataSync()[0];
-                });
+                const batchLoss = tf.tidy(() => {
+                    let batchTotalLoss = tf.scalar(0);
 
-                totalLoss += lossValue;
-
-                optimizer.minimize(() => {
-                    return tf.tidy(() => {
+                    for (const sample of batch) {
                         const userVec = userEmbedding.slice([sample.userIdx, 0], [1, numFactors]);
                         const entityVec = entityEmbedding.slice([sample.entityIdx, 0], [1, numFactors]);
                         const prediction = tf.matMul(userVec, entityVec, false, true).squeeze();
                         const label = tf.scalar(sample.rating);
-                        return tf.losses.meanSquaredError(label, prediction);
+                        const loss = tf.losses.meanSquaredError(label, prediction);
+                        batchTotalLoss = batchTotalLoss.add(loss);
+                    }
+
+                    return batchTotalLoss.div(tf.scalar(batch.length));
+                });
+
+                totalLoss += await batchLoss.data();
+                batchLoss.dispose();
+
+                // Optimize batch
+                optimizer.minimize(() => {
+                    return tf.tidy(() => {
+                        let batchTotalLoss = tf.scalar(0);
+
+                        for (const sample of batch) {
+                            const userVec = userEmbedding.slice([sample.userIdx, 0], [1, numFactors]);
+                            const entityVec = entityEmbedding.slice([sample.entityIdx, 0], [1, numFactors]);
+                            const prediction = tf.matMul(userVec, entityVec, false, true).squeeze();
+                            const label = tf.scalar(sample.rating);
+                            const loss = tf.losses.meanSquaredError(label, prediction);
+                            batchTotalLoss = batchTotalLoss.add(loss);
+                        }
+
+                        return batchTotalLoss.div(tf.scalar(batch.length));
                     });
                 });
-            } catch (sampleError) {
-                console.error(`❌ Lỗi tại sample ${idx}:`, sampleError);
+
+            } catch (batchError) {
+                console.error(`❌ Lỗi tại batch ${batchStart}-${batchEnd}:`, batchError);
                 continue;
             }
         }
 
-        if (epoch % 10 === 0) {
-            console.log(`Epoch ${epoch + 1}, Average Loss: ${totalLoss / trainData.length}`);
+        // Log ít hơn để giảm I/O
+        if (epoch % 5 === 0 || epoch === maxEpochs - 1) {
+            console.log(`Epoch ${epoch + 1}/${maxEpochs}, Average Loss: ${totalLoss / Math.ceil(trainData.length / batchSize)}`);
         }
     }
 
@@ -404,11 +925,11 @@ async function trainMatrixFactorization() {
         entityEmbedding: await entityEmbedding.data(),
         userEmbeddingShape: userEmbedding.shape,
         entityEmbeddingShape: entityEmbedding.shape,
-        users,
-        entities,
-        numUsers,
-        numEntities,
-        numFactors,
+        users: users || [],
+        entities: entities || [],
+        numUsers: users?.length || 0,
+        numEntities: entities?.length || 0,
+        numFactors: numFactors || 0,
         trainedAt: new Date().toISOString()
     };
 
@@ -427,11 +948,26 @@ async function trainMatrixFactorization() {
             entityEmbedding: tf.tensor(Array.from(modelData.entityEmbedding), modelData.entityEmbeddingShape),
             users: modelData.users,
             entities: modelData.entities,
-            numFactors: modelData.numFactors
+            numUsers: modelData.numUsers,
+            numEntities: modelData.numEntities,
+            numFactors: modelData.numFactors,
+            trainedAt: modelData.trainedAt
         };
+
+        // Cache vào Redis với TTL ngắn hơn
+        try {
+            await redisClient.setex('mf_model', 1800, JSON.stringify(modelData)); // 30 phút
+        } catch (redisError) {
+            console.warn('⚠️ Không thể cache model vào Redis:', redisError.message);
+        }
+
     } catch (error) {
         console.error('❌ Lỗi khi lưu mô hình:', error);
     }
+
+    // Cleanup tensors để tránh memory leak
+    userEmbedding.dispose();
+    entityEmbedding.dispose();
 
     return modelCache;
 }
@@ -510,9 +1046,18 @@ async function getCollaborativeRecommendations(userId, sessionId, limit = 10, ro
 
         // Lấy top
         const entityScores = entities.map((entityStr, idx) => {
-            const [type, id] = entityStr.split(':');
+            const parts = entityStr.split(':');
+            const type = parts[0];
+            const id = parts[1];
+
+            // Kiểm tra xem id có hợp lệ không
+            if (!id || id === 'undefined' || id === 'null') {
+                console.warn(`⚠️ ID không hợp lệ trong entity: ${entityStr}`);
+                return null;
+            }
+
             return { entityId: id, entityType: type, score: scoresArray[idx] };
-        });
+        }).filter(item => item !== null); // Loại bỏ các item null
 
         // Lọc theo vai trò
         let filteredEntities = entityScores;
@@ -532,21 +1077,52 @@ async function getCollaborativeRecommendations(userId, sessionId, limit = 10, ro
         userVec.dispose();
         scores.dispose();
 
-        // Lấy thông tin chi tiết
+        // Lấy thông tin chi tiết - KIỂM TRA ID TRƯỚC KHI QUERY
         const result = [];
         for (const entity of topEntities) {
-            if (entity.type === 'product') {
-                const product = await Product.findById(entity.id).lean();
-                if (product) result.push({ ...product, type: 'product' });
-            } else if (entity.type === 'post') {
-                const post = await Post.findById(entity.id).lean();
-                if (post) result.push({ ...post, type: 'post' });
-            } else if (entity.type === 'user') {
-                const user = await User.findById(entity.id).lean();
-                if (user) result.push({ ...user, type: 'user', followersCount: await UserInteraction.countDocuments({ targetType: 'user', targetId: entity.id, action: 'follow' }) });
-            } else if (entity.type === 'shop') {
-                const shop = await Shop.findById(entity.id).lean();
-                if (shop) result.push({ ...shop, type: 'shop', followersCount: await UserInteraction.countDocuments({ targetType: 'shop', targetId: entity.id, action: 'follow' }) });
+            // Kiểm tra ObjectId hợp lệ
+            if (!entity.id || entity.id === 'undefined' || entity.id === 'null') {
+                console.warn(`⚠️ Bỏ qua entity với ID không hợp lệ:`, entity);
+                continue;
+            }
+
+            // Kiểm tra định dạng ObjectId (24 ký tự hex)
+            if (!/^[0-9a-fA-F]{24}$/.test(entity.id)) {
+                console.warn(`⚠️ ID không đúng định dạng ObjectId: ${entity.id}`);
+                continue;
+            }
+
+            try {
+                if (entity.type === 'product') {
+                    const product = await Product.findById(entity.id).lean();
+                    if (product) result.push({ ...product, type: 'product' });
+                } else if (entity.type === 'post') {
+                    const post = await Post.findById(entity.id).lean();
+                    if (post) result.push({ ...post, type: 'post' });
+                } else if (entity.type === 'user') {
+                    const user = await User.findById(entity.id).lean();
+                    if (user) {
+                        const followersCount = await UserInteraction.countDocuments({
+                            targetType: 'user',
+                            targetId: entity.id,
+                            action: 'follow'
+                        });
+                        result.push({ ...user, type: 'user', followersCount });
+                    }
+                } else if (entity.type === 'shop') {
+                    const shop = await Shop.findById(entity.id).lean();
+                    if (shop) {
+                        const followersCount = await UserInteraction.countDocuments({
+                            targetType: 'shop',
+                            targetId: entity.id,
+                            action: 'follow'
+                        });
+                        result.push({ ...shop, type: 'shop', followersCount });
+                    }
+                }
+            } catch (dbError) {
+                console.error(`❌ Lỗi khi query ${entity.type} với ID ${entity.id}:`, dbError.message);
+                continue;
             }
         }
 
@@ -686,93 +1262,747 @@ async function getContentBasedRecommendationsFromSearch(query, category, hashtag
 
 ///////////////
 
-// Hàm kết hợp gợi ý
-async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'user') {
+// Hàm lấy content-based recommendations từ lịch sử user
+async function getContentBasedRecommendationsFromUserHistory(userId, sessionId, limit = 20) {
     try {
-        const collaborativeRecs = await getCollaborativeRecommendations(userId, sessionId, limit * 2, role);
+        // Lấy interactions gần đây của user
+        const recentInteractions = await UserInteraction.find({
+            $or: [
+                { 'author._id': userId },
+                { sessionId: sessionId }
+            ],
+            action: { $in: ['view', 'like', 'purchase', 'add_to_cart', 'search', 'save'] },
+            targetId: { $exists: true, $ne: null },
+            timestamp: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } // 7 ngày gần đây
+        })
+            .sort({ timestamp: -1 })
+            .limit(10)
+            .lean();
+
+        if (!recentInteractions.length) {
+            console.log('⚠️ Không có interaction gần đây để content-based filtering');
+            return [];
+        }
+
+        const contentRecs = new Set();
+
+        // Xử lý từng interaction
+        for (const interaction of recentInteractions) {
+            try {
+                if (interaction.targetType === 'search' && interaction.searchSignature) {
+                    // Gợi ý dựa trên tìm kiếm
+                    const searchRecs = await getContentBasedRecommendationsFromSearch(
+                        interaction.searchSignature.query,
+                        interaction.searchSignature.category,
+                        interaction.searchSignature.hashtags,
+                        Math.ceil(limit / 4)
+                    );
+                    searchRecs.forEach(id => contentRecs.add(id));
+
+                } else if (interaction.targetId && /^[0-9a-fA-F]{24}$/.test(interaction.targetId.toString())) {
+                    // Gợi ý dựa trên item đã tương tác
+                    const itemRecs = await getContentBasedRecommendations(
+                        interaction.targetId.toString(),
+                        Math.ceil(limit / 4)
+                    );
+                    itemRecs.forEach(id => contentRecs.add(id));
+                }
+            } catch (interactionError) {
+                console.warn(`⚠️ Lỗi khi xử lý interaction ${interaction._id}:`, interactionError.message);
+                continue;
+            }
+        }
+
+        return Array.from(contentRecs).slice(0, limit);
+
+    } catch (error) {
+        console.error('❌ Lỗi trong getContentBasedRecommendationsFromUserHistory:', error);
+        return [];
+    }
+}
+
+// Hàm kết hợp gợi ý được cải thiện với error handling tốt hơn
+async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'user') {
+    const cacheKey = `recs:hybrid:${userId || sessionId}:${limit}:${role}`;
+
+    try {
+        // Kiểm tra cache trước
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            console.log('✅ Lấy hybrid recommendations từ cache');
+            return JSON.parse(cached);
+        }
+
+        console.log(`🔍 Tạo hybrid recommendations cho user: ${userId || sessionId}, role: ${role}`);
+
+        // Khởi tạo arrays để tránh undefined
+        let collaborativeRecs = [];
+        let contentBasedIds = [];
+
+        // 1. Lấy gợi ý từ collaborative filtering với timeout ngắn
+        try {
+            console.log('📊 Đang lấy collaborative recommendations...');
+
+            // Tạo timeout promise cho collaborative filtering
+            const collabTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Collaborative filtering timeout')), 15000); // 15 giây
+            });
+
+            const collabPromise = getCollaborativeRecommendations(
+                userId,
+                sessionId,
+                Math.min(limit * 2, 50),
+                role
+            );
+
+            collaborativeRecs = await Promise.race([collabPromise, collabTimeout]);
+            console.log(`📊 Collaborative recs: ${collaborativeRecs?.length || 0} items`);
+        } catch (collabError) {
+            console.warn('⚠️ Lỗi collaborative filtering:', collabError.message);
+            collaborativeRecs = [];
+
+            // Nếu collaborative filtering timeout, fallback ngay
+            if (collabError.message.includes('timeout')) {
+                console.log('🔄 Collaborative filtering timeout, fallback to popular items');
+                return await getFallbackRecommendations(role, limit);
+            }
+        }
+
+        // 2. Lấy gợi ý từ content-based filtering với timeout ngắn
+        try {
+            console.log('📊 Đang lấy content-based recommendations...');
+
+            const contentTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Content-based filtering timeout')), 10000); // 10 giây
+            });
+
+            const contentPromise = getContentBasedRecommendationsFromUserHistory(
+                userId,
+                sessionId,
+                Math.min(limit * 2, 50)
+            );
+
+            contentBasedIds = await Promise.race([contentPromise, contentTimeout]);
+            console.log(`📊 Content-based IDs: ${contentBasedIds?.length || 0} items`);
+        } catch (contentError) {
+            console.warn('⚠️ Lỗi content-based filtering:', contentError.message);
+            contentBasedIds = [];
+        }
+
+        // 3. Kiểm tra nếu cả hai đều trống, fallback ngay
+        if ((!collaborativeRecs || collaborativeRecs.length === 0) &&
+            (!contentBasedIds || contentBasedIds.length === 0)) {
+            console.log('⚠️ Không có gợi ý từ cả hai phương pháp, fallback ngay');
+            return await getFallbackRecommendations(role, limit);
+        }
+
+        // 4. Nếu chỉ có collaborative recs và đủ số lượng, trả về luôn
+        if (collaborativeRecs && collaborativeRecs.length >= limit && (!contentBasedIds || contentBasedIds.length === 0)) {
+            console.log('✅ Chỉ sử dụng collaborative recs vì đã đủ');
+            const result = collaborativeRecs.slice(0, limit);
+            await redisClient.setex(cacheKey, 1800, JSON.stringify(result));
+            return result;
+        }
+
+        // 5. Kết hợp điểm số với trọng số khác nhau
+        const scoreMap = new Map();
+        const entityMap = new Map();
+
+        // Xử lý collaborative filtering results (trọng số 0.8)
+        if (collaborativeRecs && Array.isArray(collaborativeRecs)) {
+            collaborativeRecs.forEach((item, index) => {
+                if (item && item._id) {
+                    const itemId = item._id.toString();
+                    const score = (collaborativeRecs.length - index) / collaborativeRecs.length * 0.8;
+                    scoreMap.set(itemId, (scoreMap.get(itemId) || 0) + score);
+                    entityMap.set(itemId, { ...item, source: 'collaborative' });
+                }
+            });
+        }
+
+        // Xử lý content-based results (trọng số 0.2)
+        if (contentBasedIds && Array.isArray(contentBasedIds)) {
+            for (let i = 0; i < Math.min(contentBasedIds.length, limit); i++) {
+                const itemId = contentBasedIds[i];
+                if (itemId && typeof itemId === 'string' && /^[0-9a-fA-F]{24}$/.test(itemId)) {
+                    const score = (Math.min(contentBasedIds.length, limit) - i) / Math.min(contentBasedIds.length, limit) * 0.2;
+                    scoreMap.set(itemId, (scoreMap.get(itemId) || 0) + score);
+
+                    if (!entityMap.has(itemId)) {
+                        entityMap.set(itemId, { _id: itemId, source: 'content-based', needsFetch: true });
+                    }
+                }
+            }
+        }
+
+        // 6. Nếu vẫn không có gợi ý nào, fallback
+        if (scoreMap.size === 0) {
+            console.log('⚠️ Không có điểm số nào, fallback về popular items');
+            return await getFallbackRecommendations(role, limit);
+        }
+
+        // 7. Sắp xếp theo điểm số và lấy top items
+        const topScoredItems = [...scoreMap.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, limit)
+            .map(([itemId, score]) => ({ itemId, score, entity: entityMap.get(itemId) }));
+
+        console.log(`🎯 Top scored items: ${topScoredItems.length}`);
+
+        // 8. Fetch thông tin chi tiết với timeout
+        let result = [];
+        try {
+            const fetchTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Fetch timeout')), 8000); // 8 giây
+            });
+
+            const fetchPromise = fetchDetailedRecommendations(topScoredItems, role);
+            result = await Promise.race([fetchPromise, fetchTimeout]);
+        } catch (fetchError) {
+            console.warn('⚠️ Lỗi khi fetch detailed recommendations:', fetchError.message);
+            // Trả về những gì đã có trong collaborative recs
+            result = collaborativeRecs.slice(0, limit) || [];
+        }
+
+        // 9. Đảm bảo result là array hợp lệ
+        if (!result || !Array.isArray(result)) {
+            console.warn('⚠️ Result không hợp lệ, sử dụng collaborative recs');
+            result = collaborativeRecs.slice(0, limit) || [];
+        }
+
+        // 10. Nếu vẫn không có gì, fallback
+        if (result.length === 0) {
+            console.log('🔄 Không có result, fallback');
+            result = await getFallbackRecommendations(role, limit);
+        }
+
+        // 11. Cache kết quả nếu có
+        if (result.length > 0) {
+            try {
+                await redisClient.setex(cacheKey, 1800, JSON.stringify(result)); // Cache 30 phút
+            } catch (cacheError) {
+                console.warn('⚠️ Không thể cache result:', cacheError.message);
+            }
+        }
+
+        console.log(`✅ Trả về ${result.length} hybrid recommendations`);
+        return result;
+
+    } catch (error) {
+        console.error('❌ Lỗi trong getHybridRecommendations:', error);
+
+        // Fallback error handling
+        try {
+            console.log('🔄 Fallback do lỗi trong hybrid recommendations...');
+            return await getFallbackRecommendations(role, limit);
+        } catch (fallbackError) {
+            console.error('❌ Lỗi fallback:', fallbackError);
+            return []; // Trả về array rỗng thay vì throw error
+        }
+    }
+}
+
+
+// Hàm fetch thông tin chi tiết cho recommendations
+async function fetchDetailedRecommendations(scoredItems, role) {
+    const result = [];
+
+    // Phân loại items theo type
+    const itemsByType = {
+        product: [],
+        post: [],
+        user: [],
+        shop: []
+    };
+
+    // Phân loại và chuẩn bị IDs để query
+    for (const { itemId, score, entity } of scoredItems) {
+        if (entity && !entity.needsFetch) {
+            // Đã có thông tin chi tiết từ collaborative filtering
+            result.push({ ...entity, hybridScore: score });
+        } else {
+            // Cần fetch thông tin chi tiết
+            // Xác định type dựa trên role và ưu tiên
+            let assumedType = 'product'; // default
+            if (role === 'user') {
+                assumedType = Math.random() > 0.7 ? 'user' : 'product'; // 70% product, 30% user/shop
+            } else if (role === 'shop') {
+                assumedType = Math.random() > 0.8 ? 'user' : 'product'; // 80% product, 20% user
+            }
+
+            itemsByType[assumedType].push({ itemId, score });
+        }
+    }
+
+    // Fetch theo batch để tối ưu hiệu suất
+    const fetchPromises = [];
+
+    if (itemsByType.product.length > 0) {
+        fetchPromises.push(
+            Product.find({
+                _id: { $in: itemsByType.product.map(i => i.itemId) },
+                isActive: true
+            })
+                .lean()
+                .then(products => products.map(p => ({ ...p, type: 'product' })))
+        );
+    }
+
+    if (itemsByType.post.length > 0) {
+        fetchPromises.push(
+            Post.find({
+                _id: { $in: itemsByType.post.map(i => i.itemId) },
+                privacy: 'public'
+            })
+                .populate('author._id', 'fullName avatar')
+                .lean()
+                .then(posts => posts.map(p => ({ ...p, type: 'post' })))
+        );
+    }
+
+    if (itemsByType.user.length > 0) {
+        fetchPromises.push(
+            User.find({
+                _id: { $in: itemsByType.user.map(i => i.itemId) },
+                isActive: true
+            })
+                .select('fullName avatar bio')
+                .lean()
+                .then(async users => {
+                    const usersWithStats = await Promise.all(
+                        users.map(async u => ({
+                            ...u,
+                            type: 'user',
+                            followersCount: await UserInteraction.countDocuments({
+                                targetType: 'user',
+                                targetId: u._id,
+                                action: 'follow'
+                            })
+                        }))
+                    );
+                    return usersWithStats;
+                })
+        );
+    }
+
+    if (itemsByType.shop.length > 0) {
+        fetchPromises.push(
+            Shop.find({
+                _id: { $in: itemsByType.shop.map(i => i.itemId) },
+                'status.isActive': true,
+                'status.isApprovedCreate': true
+            })
+                .select('name avatar description stats')
+                .lean()
+                .then(shops => shops.map(s => ({ ...s, type: 'shop' })))
+        );
+    }
+
+    // Thực hiện tất cả fetch operations
+    try {
+        const fetchedResults = await Promise.all(fetchPromises);
+        const allFetchedItems = fetchedResults.flat();
+
+        // Gắn điểm số hybrid cho các item đã fetch
+        for (const item of allFetchedItems) {
+            const matchingScore = [...itemsByType.product, ...itemsByType.post, ...itemsByType.user, ...itemsByType.shop]
+                .find(scored => scored.itemId === item._id.toString());
+
+            if (matchingScore) {
+                result.push({ ...item, hybridScore: matchingScore.score });
+            }
+        }
+
+    } catch (fetchError) {
+        console.error('❌ Lỗi khi fetch detailed recommendations:', fetchError);
+    }
+
+    // Sắp xếp theo hybridScore và giới hạn kết quả
+    return result
+        .sort((a, b) => (b.hybridScore || 0) - (a.hybridScore || 0))
+        .slice(0, scoredItems.length);
+}
+
+// Hàm fallback khi không có gợi ý
+async function getFallbackRecommendations(role, limit) {
+    console.log(`🔄 Getting fallback recommendations for role: ${role}`);
+
+    try {
+        if (role === 'user') {
+            // Fallback cho user: products phổ biến + shops nổi bật
+            const [popularProducts, popularShops] = await Promise.all([
+                Product.find({ isActive: true })
+                    .sort({ soldCount: -1, 'ratings.avg': -1 })
+                    .limit(Math.ceil(limit * 0.7))
+                    .lean(),
+                Shop.find({
+                    'status.isActive': true,
+                    'status.isApprovedCreate': true
+                })
+                    .sort({ 'stats.rating.avg': -1, 'stats.followers.length': -1 })
+                    .limit(Math.ceil(limit * 0.3))
+                    .lean()
+            ]);
+
+            return [
+                ...popularProducts.map(p => ({ ...p, type: 'product' })),
+                ...popularShops.map(s => ({ ...s, type: 'shop' }))
+            ].slice(0, limit);
+
+        } else if (role === 'shop') {
+            // Fallback cho shop: trending posts + popular users
+            const [trendingPosts, popularUsers] = await Promise.all([
+                Post.find({ privacy: 'public' })
+                    .sort({ likesCount: -1, commentsCount: -1, createdAt: -1 })
+                    .populate('author._id', 'fullName avatar')
+                    .limit(Math.ceil(limit * 0.6))
+                    .lean(),
+                User.find({ isActive: true })
+                    .sort({ createdAt: -1 })
+                    .select('fullName avatar bio')
+                    .limit(Math.ceil(limit * 0.4))
+                    .lean()
+            ]);
+
+            const usersWithFollowers = await Promise.all(
+                popularUsers.map(async u => ({
+                    ...u,
+                    type: 'user',
+                    followersCount: await UserInteraction.countDocuments({
+                        targetType: 'user',
+                        targetId: u._id,
+                        action: 'follow'
+                    })
+                }))
+            );
+
+            return [
+                ...trendingPosts.map(p => ({ ...p, type: 'post' })),
+                ...usersWithFollowers
+            ].slice(0, limit);
+        }
+
+        // Default fallback
+        const popularProducts = await Product.find({ isActive: true })
+            .sort({ soldCount: -1 })
+            .limit(limit)
+            .lean();
+
+        return popularProducts.map(p => ({ ...p, type: 'product' }));
+
+    } catch (error) {
+        console.error('❌ Lỗi trong getFallbackRecommendations:', error);
+        return [];
+    }
+}
+
+/////////////////////
+
+// Hàm debug để kiểm tra chi tiết quá trình recommendation
+async function debugGetCollaborativeRecommendations(userId, sessionId, limit = 10, role = 'user') {
+    console.log(`🔍 DEBUG: Starting collaborative recommendations for userId: ${userId}, sessionId: ${sessionId}, role: ${role}`);
+
+    try {
+        const model = await loadMatrixFactorizationModel();
+        if (!model) {
+            console.warn('⚠️ Không có model để thực hiện recommendation');
+            return [];
+        }
+
+        const { userEmbedding, entityEmbedding, users, entities } = model;
+        const userIdx = users.indexOf(userId || sessionId);
+
+        console.log(`🔍 DEBUG: User index: ${userIdx}, Total users: ${users.length}`);
+        console.log(`🔍 DEBUG: Total entities: ${entities.length}`);
+
+        if (userIdx === -1) {
+            console.log(`⚠️ Không tìm thấy user ${userId || sessionId} trong model`);
+            return [];
+        }
+
+        // Tính điểm số cho tất cả items
+        const userVec = userEmbedding.slice([userIdx, 0], [1, userEmbedding.shape[1]]);
+        const scores = tf.matMul(userVec, entityEmbedding, false, true).squeeze();
+        const scoresArray = await scores.data();
+
+        console.log(`🔍 DEBUG: Scores calculated, length: ${scoresArray.length}`);
+
+        // Lấy top scores và debug
+        const entityScores = entities.map((entityStr, idx) => {
+            const parts = entityStr.split(':');
+            const type = parts[0];
+            const id = parts[1];
+
+            if (!id || id === 'undefined' || id === 'null') {
+                console.warn(`⚠️ ID không hợp lệ trong entity: ${entityStr}`);
+                return null;
+            }
+
+            return {
+                entityId: id,
+                entityType: type,
+                score: scoresArray[idx],
+                originalEntityStr: entityStr
+            };
+        }).filter(item => item !== null);
+
+        console.log(`🔍 DEBUG: Valid entity scores: ${entityScores.length}`);
+        console.log(`🔍 DEBUG: Sample entity scores:`, entityScores.slice(0, 5));
+
+        // Lọc theo vai trò
+        let filteredEntities = entityScores;
+        if (role === 'user') {
+            filteredEntities = entityScores.filter(e => ['product', 'post', 'user', 'shop'].includes(e.entityType));
+        } else if (role === 'shop') {
+            filteredEntities = entityScores.filter(e => ['product', 'post', 'user'].includes(e.entityType));
+        }
+
+        console.log(`🔍 DEBUG: After role filtering (${role}): ${filteredEntities.length}`);
+
+        // Sắp xếp và lấy top
+        const topEntities = filteredEntities
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
+
+        console.log(`🔍 DEBUG: Top entities selected: ${topEntities.length}`);
+        console.log(`🔍 DEBUG: Top entities details:`, topEntities.map(e => ({
+            type: e.entityType,
+            id: e.entityId,
+            score: e.score
+        })));
+
+        // Cleanup tensors
+        userVec.dispose();
+        scores.dispose();
+
+        // Lấy thông tin chi tiết
+        const result = [];
+        for (const entity of topEntities) {
+            if (!entity.entityId || entity.entityId === 'undefined' || entity.entityId === 'null') {
+                console.warn(`⚠️ Bỏ qua entity với ID không hợp lệ:`, entity);
+                continue;
+            }
+
+            if (!/^[0-9a-fA-F]{24}$/.test(entity.entityId)) {
+                console.warn(`⚠️ ID không đúng định dạng ObjectId: ${entity.entityId}`);
+                continue;
+            }
+
+            try {
+                let item = null;
+                if (entity.entityType === 'product') {
+                    item = await Product.findById(entity.entityId).lean();
+                    if (item) {
+                        console.log(`✅ Found product: ${item.name}`);
+                        result.push({ ...item, type: 'product' });
+                    }
+                } else if (entity.entityType === 'post') {
+                    item = await Post.findById(entity.entityId).lean();
+                    if (item) {
+                        console.log(`✅ Found post: ${entity.entityId}`);
+                        result.push({ ...item, type: 'post' });
+                    }
+                } else if (entity.entityType === 'user') {
+                    item = await User.findById(entity.entityId).lean();
+                    if (item) {
+                        const followersCount = await UserInteraction.countDocuments({
+                            targetType: 'user',
+                            targetId: entity.entityId,
+                            action: 'follow'
+                        });
+                        console.log(`✅ Found user: ${item.username || item.email}`);
+                        result.push({ ...item, type: 'user', followersCount });
+                    }
+                } else if (entity.entityType === 'shop') {
+                    item = await Shop.findById(entity.entityId).lean();
+                    if (item) {
+                        const followersCount = await UserInteraction.countDocuments({
+                            targetType: 'shop',
+                            targetId: entity.entityId,
+                            action: 'follow'
+                        });
+                        console.log(`✅ Found shop: ${item.name || item._id}`);
+                        result.push({ ...item, type: 'shop', followersCount });
+                    }
+                }
+
+                if (!item) {
+                    console.warn(`⚠️ Không tìm thấy ${entity.entityType} với ID: ${entity.entityId}`);
+                }
+            } catch (dbError) {
+                console.error(`❌ Lỗi khi query ${entity.entityType} với ID ${entity.entityId}:`, dbError.message);
+                continue;
+            }
+        }
+
+        console.log(`🔍 DEBUG: Final result count: ${result.length}`);
+        console.log(`🔍 DEBUG: Result types:`, result.map(r => r.type));
+
+        return result;
+    } catch (error) {
+        console.error('❌ Lỗi trong debugGetCollaborativeRecommendations:', error);
+        return [];
+    }
+}
+
+// Sửa lại hàm getHybridRecommendations với debug
+async function debugGetHybridRecommendations(userId, sessionId, limit = 10, role = 'user') {
+    console.log(`🔍 DEBUG HYBRID: Starting hybrid recommendations for userId: ${userId}, sessionId: ${sessionId}, role: ${role}`);
+
+    try {
+        // Sử dụng hàm debug collaborative
+        const collaborativeRecs = await debugGetCollaborativeRecommendations(userId, sessionId, limit * 2, role);
+        console.log(`🔍 DEBUG HYBRID: Collaborative recs count: ${collaborativeRecs.length}`);
+        console.log(`🔍 DEBUG HYBRID: Collaborative types:`, collaborativeRecs.map(r => r.type));
+
         const contentRecs = [];
 
         // Lấy các entity người dùng đã tương tác
         const interactions = await UserInteraction.find({
             $or: [{ 'author._id': userId }, { sessionId }],
-            action: { $in: ['view', 'like', 'purchase', 'add_to_cart', 'search'] }
+            action: { $in: ['view', 'like', 'purchase', 'add_to_cart', 'search'] },
+            targetId: { $exists: true, $ne: null }
         }).sort({ timestamp: -1 }).limit(5);
 
-        // Gợi ý dựa trên nội dung của các mục đã tương tác, bao gồm cả tìm kiếm
+        console.log(`🔍 DEBUG HYBRID: Found ${interactions.length} recent interactions`);
+
+        // Gợi ý dựa trên nội dung của các mục đã tương tác
         for (const interaction of interactions) {
-            if (interaction.targetType === 'search') {
-                const searchQuery = interaction.searchSignature.query;
-                const category = interaction.searchSignature.category;
-                const hashtags = interaction.searchSignature.hashtags;
-                //Gợi ý dựa trên từ khóa tìm kiếm, danh mục, và hashtag
-                const searchBasedRecs = await getContentBasedRecommendationsFromSearch(searchQuery, category, hashtags, Math.ceil(limit / 2));
-                contentRecs.push(...searchBasedRecs);
-            } else {
-                const recs = await getContentBasedRecommendations(interaction.targetId.toString(), Math.ceil(limit / 2));
-                contentRecs.push(...recs);
+            try {
+                if (interaction.targetType === 'search') {
+                    if (interaction.searchSignature && typeof interaction.searchSignature === 'object') {
+                        const searchQuery = interaction.searchSignature.query;
+                        const category = interaction.searchSignature.category;
+                        const hashtags = interaction.searchSignature.hashtags;
+                        const searchBasedRecs = await getContentBasedRecommendationsFromSearch(searchQuery, category, hashtags, Math.ceil(limit / 2));
+                        contentRecs.push(...searchBasedRecs);
+                    }
+                } else {
+                    if (interaction.targetId && /^[0-9a-fA-F]{24}$/.test(interaction.targetId.toString())) {
+                        const recs = await getContentBasedRecommendations(interaction.targetId.toString(), Math.ceil(limit / 2));
+                        contentRecs.push(...recs);
+                    }
+                }
+            } catch (interactionError) {
+                console.warn(`⚠️ Lỗi khi xử lý interaction ${interaction._id}:`, interactionError.message);
+                continue;
             }
         }
+
+        console.log(`🔍 DEBUG HYBRID: Content recs count: ${contentRecs.length}`);
 
         // Kết hợp điểm số
         const scoreMap = new Map();
 
         // Điểm từ collaborative filtering (trọng số 0.7)
         collaborativeRecs.forEach((item, idx) => {
-            const score = (1 - idx / collaborativeRecs.length) * 0.7;
-            scoreMap.set(item._id.toString(), (scoreMap.get(item._id.toString()) || 0) + score);
+            if (item && item._id) {
+                const score = (1 - idx / collaborativeRecs.length) * 0.7;
+                scoreMap.set(item._id.toString(), (scoreMap.get(item._id.toString()) || 0) + score);
+            }
         });
 
         // Điểm từ content-based filtering (trọng số 0.3)
         contentRecs.forEach((itemId, idx) => {
-            const score = (1 - idx / contentRecs.length) * 0.3;
-            scoreMap.set(itemId, (scoreMap.get(itemId) || 0) + score);
+            if (itemId && /^[0-9a-fA-F]{24}$/.test(itemId)) {
+                const score = (1 - idx / contentRecs.length) * 0.3;
+                scoreMap.set(itemId, (scoreMap.get(itemId) || 0) + score);
+            }
         });
+
+        console.log(`🔍 DEBUG HYBRID: Score map size: ${scoreMap.size}`);
+
+        // Nếu không có gợi ý từ cả hai phương pháp, trả về gợi ý collaborative
+        if (scoreMap.size === 0) {
+            console.log('⚠️ Không có điểm số nào, trả về collaborative recs');
+            return collaborativeRecs.slice(0, limit);
+        }
 
         // Sắp xếp và lấy top
         const recommendations = [...scoreMap.entries()]
             .sort((a, b) => b[1] - a[1])
-            .slice(0, limit)
-            .map(([itemId]) => {
-                const match = collaborativeRecs.find(r => r._id.toString() === itemId) || { _id: itemId };
-                return match;
+            .slice(0, limit * 2) // Lấy nhiều hơn để có đủ sau khi filter
+            .map(([itemId, score]) => {
+                const match = collaborativeRecs.find(r => r._id && r._id.toString() === itemId);
+                return match || { _id: itemId, score };
             });
 
-        // Lấy thông tin chi tiết
-        const productIds = recommendations.filter(r => r.type === 'product').map(r => r._id);
-        const postIds = recommendations.filter(r => r.type === 'post').map(r => r._id);
-        const userIds = recommendations.filter(r => r.type === 'user').map(r => r._id);
-        const shopIds = recommendations.filter(r => r.type === 'shop').map(r => r._id);
+        console.log(`🔍 DEBUG HYBRID: Pre-filter recommendations: ${recommendations.length}`);
 
-        const [products, posts, users, shops] = await Promise.all([
-            Product.find({ _id: { $in: productIds }, isActive: true }).lean(),
-            Post.find({ _id: { $in: postIds }, privacy: 'public' }).lean(),
-            User.find({ _id: { $in: userIds } }).lean().then(users => users.map(u => ({
-                ...u,
-                type: 'user',
-                followersCount: UserInteraction.countDocuments({ targetType: 'user', targetId: u._id, action: 'follow' })
-            }))),
-            Shop.find({ _id: { $in: shopIds } }).lean().then(shops => shops.map(s => ({
-                ...s,
-                type: 'shop',
-                followersCount: UserInteraction.countDocuments({ targetType: 'shop', targetId: s._id, action: 'follow' })
-            })))
-        ]);
-
-        // Sắp xếp theo thứ tự recommendation
+        // Lấy thông tin chi tiết cho những item chưa có thông tin
         const result = [];
         for (const rec of recommendations) {
-            let item;
-            if (rec.type === 'product') item = products.find(p => p._id.toString() === rec._id.toString());
-            else if (rec.type === 'post') item = posts.find(p => p._id.toString() === rec._id.toString());
-            else if (rec.type === 'user') item = users.find(u => u._id.toString() === rec._id.toString());
-            else if (rec.type === 'shop') item = shops.find(s => s._id.toString() === rec._id.toString());
-            if (item) result.push(item);
+            if (!rec._id) continue;
+
+            const recId = rec._id.toString();
+
+            // Nếu đã có type, thêm vào result
+            if (rec.type) {
+                result.push(rec);
+                continue;
+            }
+
+            // Nếu chưa có type, cần query để xác định
+            try {
+                // Thử tìm trong các collection
+                let item = null;
+                let itemType = null;
+
+                // Thử product trước
+                item = await Product.findById(recId).lean();
+                if (item) {
+                    itemType = 'product';
+                } else {
+                    // Thử post
+                    item = await Post.findById(recId).lean();
+                    if (item) {
+                        itemType = 'post';
+                    } else {
+                        // Thử user
+                        item = await User.findById(recId).lean();
+                        if (item) {
+                            itemType = 'user';
+                            const followersCount = await UserInteraction.countDocuments({
+                                targetType: 'user',
+                                targetId: recId,
+                                action: 'follow'
+                            });
+                            item.followersCount = followersCount;
+                        } else {
+                            // Thử shop
+                            item = await Shop.findById(recId).lean();
+                            if (item) {
+                                itemType = 'shop';
+                                const followersCount = await UserInteraction.countDocuments({
+                                    targetType: 'shop',
+                                    targetId: recId,
+                                    action: 'follow'
+                                });
+                                item.followersCount = followersCount;
+                            }
+                        }
+                    }
+                }
+
+                if (item && itemType) {
+                    result.push({ ...item, type: itemType });
+                }
+            } catch (dbError) {
+                console.error(`❌ Lỗi khi query item với ID ${recId}:`, dbError.message);
+                continue;
+            }
         }
+
+        console.log(`🔍 DEBUG HYBRID: Final result count: ${result.length}`);
+        console.log(`🔍 DEBUG HYBRID: Final result types:`, result.reduce((acc, item) => {
+            acc[item.type] = (acc[item.type] || 0) + 1;
+            return acc;
+        }, {}));
 
         return result;
 
     } catch (error) {
-        console.error('❌ Lỗi trong getHybridRecommendations:', error);
+        console.error('❌ Lỗi trong debugGetHybridRecommendations:', error);
         return [];
     }
 }
@@ -781,10 +2011,14 @@ module.exports = {
     prepareUserEntityMatrix,
     trainUserShopModel,
     trainMatrixFactorization,
+    loadMatrixFactorizationModel,
     prepareTfIdfMatrix,
     getUserShopRecommendations,
     getCollaborativeRecommendations,
     getContentBasedRecommendations,
     getContentBasedRecommendationsFromSearch,
     getHybridRecommendations,
+
+    debugGetCollaborativeRecommendations,
+    debugGetHybridRecommendations
 };

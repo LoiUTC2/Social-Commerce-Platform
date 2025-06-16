@@ -117,7 +117,7 @@ exports.getCurrentUser = async (req, res) => {
         const userId = req.user.userId;
 
         const user = await User.findById(userId).select(
-            'fullName email avatar coverImage bio phone gender dateOfBirth address role roles currentRole shopId isSellerActive followers following savedPosts likedPosts likedComments createdAt updatedAt'
+            'fullName email avatar coverImage bio phone gender dateOfBirth address role roles currentRole shopId isSellerActive savedPosts likedPosts likedComments createdAt updatedAt'
         ).populate('shopId', 'name avatar slug isApproved');
 
         if (!user) {
@@ -138,8 +138,6 @@ exports.getUserBySlug = async (req, res) => {
             .select('-password -refreshToken -refreshTokenUsage -ip -userAgent')
             .populate('shopId', 'name avatar logo coverImage')
             .populate('sellerId')
-            .populate('followers', 'fullName avatar')
-            .populate('following', 'fullName avatar');
 
         if (!user) {
             return errorResponse(res, 'Không tìm thấy người dùng', 404);
