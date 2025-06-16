@@ -66,16 +66,16 @@ const cartRoutes = require('./routes/cartRoutes')
 const orderRoutes = require('./routes/orderRoutes')
 const productReviewRoutes = require('./routes/productReviewRoutes')
 const shopReviewRoutes = require('./routes/shopReviewRoutes')
+const searchRoutes = require('./routes/searchRoutes');
 const hashtagsRoutes = require('./routes/hashtagsRouter')
+const savedPostRoutes = require('./routes/savedPostRoutes');
 const followRoutes = require('./routes/followRoutes');
+const recommendationRoutes = require('./routes/recommendationRoutes');
 
 const shopManagerRoutes = require('./routes/shopManagerRoutes');
 const adminProductRoutes = require('./routes/adminProductRoutes');
 
-const searchRoutes = require('./routes/searchRoutes');
 
-const recommendationRoutes = require('./routes/recommendationRoutes');
-app.use('/api/recommendations', recommendationRoutes);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/interactions', interactionRoutes);
@@ -89,14 +89,14 @@ app.use('/api/carts', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/product-reviews', productReviewRoutes);
 app.use('/api/shop-reviews', shopReviewRoutes);
+app.use('/api/search', searchRoutes);
 app.use('/api/hashtags', hashtagsRoutes);
+app.use('/api/saved-posts', savedPostRoutes);
 app.use('/api/follow', followRoutes);
+app.use('/api/recommendations', recommendationRoutes);
 
 app.use('/api/admin/shops', shopManagerRoutes); //quản lí duyệt shop đăng kí
 app.use('/api/admin/products', adminProductRoutes); //quản lí sản phẩm nền tảng
-
-
-app.use('/api/search', searchRoutes);
 
 app.use('/api/upload', uploadRoutes);
 app.use('/uploads', express.static('uploads')); // phục vụ file tĩnh

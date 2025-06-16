@@ -2,11 +2,9 @@ import { useState, useEffect } from "react"
 import { Card, CardContent } from "../../components/ui/card"
 import { Button } from "../../components/ui/button"
 import { Badge } from "../../components/ui/badge"
-import { MoreHorizontal, Heart, MessageCircle, Share, Send, Lock, Globe, Users, ShoppingCart } from "lucide-react"
-
+import { MoreHorizontal, Heart, MessageCircle, Share, Send, Lock, Globe, Users, ShoppingCart, UserPlus, UserCheck, Bookmark, BookmarkCheck } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../../components/ui/tooltip"
-import { useAuth } from "../../contexts/AuthContext"
 
 import MediaGallery from "./MediaGallery"
 import ProductCard from "./ProductCard"
@@ -15,12 +13,18 @@ import CommentModal from "./CommentModal"
 import SharePostModal from "./SharePostModal"
 import SharesListModal from "./SharesListModal"
 
-import { useNavigate } from "react-router-dom"
-import { likePost, getPostLikes, getPostShares } from "../../services/postInteractionService"
-
 import { toast } from "sonner"
-import { formatDistanceToNow, format } from "date-fns"
+import { formatDistanceToNow, format, isValid } from "date-fns"
 import { vi } from "date-fns/locale"
+import { formatTimeAgo } from '../../utils/timeFormatter';
+import { useNavigate } from "react-router-dom"
+
+import { likePost, getPostLikes, getPostShares } from "../../services/postInteractionService"
+import { toggleFollow } from "../../services/followService"
+import { toggleSavePost, checkSavedPost } from "../../services/savedPostService"
+
+import { useAuth } from "../../contexts/AuthContext"
+import { useFollow } from "../../contexts/FollowContext";
 
 export default function FeedItem({ post }) {
   const {
@@ -39,10 +43,17 @@ export default function FeedItem({ post }) {
   } = post
 
   const { user, setShowLoginModal } = useAuth()
+  const { getFollowStatus, updateFollowStatus } = useFollow();
   const navigate = useNavigate()
 
   const nameAuthor = author?.type === "User" ? author?._id?.fullName : author?._id?.name
   const avatarAuthor = author?._id?.avatar
+
+  const [isFollowing, setIsFollowing] = useState(false) //hiển thị chữ theo dõi/đang theo dõi
+  const [followLoading, setFollowLoading] = useState(false)
+
+  const [isSaved, setIsSaved] = useState(false)
+  const [saveLoading, setSaveLoading] = useState(false)
 
   const [likes, setLikes] = useState(likesCount)
   const [liked, setLiked] = useState(false)
@@ -108,6 +119,11 @@ export default function FeedItem({ post }) {
   const displayMedia = getDisplayMedia()
   const hasProducts = productIds && productIds.length > 0
 
+  const timePosted = formatTimeAgo(createdAt);
+
+  const timeShared = formatTimeAgo(sharedPost?.createdAt, "Chưa được chia sẻ");
+
+
   const renderPrivacyIcon = (privacy) => {
     const iconProps = { className: "w-3 h-3" }
     switch (privacy) {
@@ -143,6 +159,48 @@ export default function FeedItem({ post }) {
     }
   }
 
+  // Kiểm tra trạng thái follow ngay từ đầu
+  useEffect(() => {
+    const checkInitialFollowStatus = async () => {
+      if (!user || !author?._id?._id || user._id === author?._id?._id) {
+        setIsFollowing(false);
+        return;
+      }
+
+      try {
+        const targetType = author?.type === "Shop" ? "shop" : "user";
+        const isFollowing = await getFollowStatus(author._id._id, targetType);
+        setIsFollowing(isFollowing);
+      } catch (err) {
+        console.error("Lỗi kiểm tra trạng thái follow:", err);
+        setIsFollowing(false);
+      }
+    }
+
+    checkInitialFollowStatus();
+  }, [user, author?._id?._id, author?.type, getFollowStatus]);
+
+  // Kiểm tra trạng thái lưu bài viết
+  useEffect(() => {
+    const checkSavedStatus = async () => {
+      if (!user) {
+        setIsSaved(false)
+        return
+      }
+
+      try {
+        const res = await checkSavedPost(_id)
+        setIsSaved(res.data.isSaved)
+      } catch (err) {
+        console.error("Lỗi kiểm tra trạng thái lưu bài viết:", err)
+        setIsSaved(false)
+      }
+    }
+
+    checkSavedStatus()
+  }, [_id, user])
+
+  // Kiểm tra trạng thái like
   useEffect(() => {
     const fetchLikes = async () => {
       try {
@@ -163,6 +221,65 @@ export default function FeedItem({ post }) {
     }
     fetchLikes()
   }, [_id, user])
+
+  const handleToggleFollow = async () => {
+    if (!user) return setShowLoginModal(true);
+    if (user._id === author?._id?._id) return;
+
+    setFollowLoading(true);
+    try {
+      const targetType = author?.type === "Shop" ? "shop" : "user";
+      const res = await toggleFollow({
+        targetId: author._id._id,
+        targetType
+      });
+
+      const newFollowStatus = res.data.isFollowing;
+      setIsFollowing(newFollowStatus);
+
+      // Cập nhật cache
+      updateFollowStatus(author._id._id, targetType, newFollowStatus);
+
+      toast.success(
+        newFollowStatus ? "Đã theo dõi" : "Đã bỏ theo dõi",
+        {
+          description: newFollowStatus
+            ? `Bạn đã theo dõi ${nameAuthor}`
+            : `Bạn đã bỏ theo dõi ${nameAuthor}`
+        }
+      );
+    } catch (err) {
+      console.error("Lỗi toggle follow:", err);
+      toast.error("Có lỗi xảy ra", {
+        description: "Không thể thực hiện hành động này"
+      });
+    } finally {
+      setFollowLoading(false);
+    }
+  };
+
+  const handleToggleSave = async () => {
+    if (!user) return setShowLoginModal(true)
+
+    setSaveLoading(true)
+    try {
+      const res = await toggleSavePost(_id)
+      setIsSaved(!isSaved)
+
+      toast.success(res.message || (isSaved ? "Đã bỏ lưu bài viết" : "Đã lưu bài viết thành công"), {
+        description: isSaved
+          ? "Bài viết đã được xóa khỏi danh sách đã lưu"
+          : "Bài viết đã được thêm vào danh sách đã lưu"
+      })
+    } catch (err) {
+      console.error("Lỗi khi lưu/bỏ lưu bài viết:", err)
+      toast.error("Có lỗi xảy ra", {
+        description: "Không thể thực hiện hành động này"
+      })
+    } finally {
+      setSaveLoading(false)
+    }
+  }
 
   const handleLike = async () => {
     if (!user) return setShowLoginModal(true)
@@ -250,7 +367,7 @@ export default function FeedItem({ post }) {
         {/* Header */}
         <div className="p-4 pb-3">
           <div className="flex justify-between items-start">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-1">
               <div className="relative">
                 <img
                   src={avatarAuthor || "/placeholder.svg?height=40&width=40"}
@@ -264,29 +381,49 @@ export default function FeedItem({ post }) {
                   </div>
                 )}
               </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p
-                    className="font-semibold text-gray-900 cursor-pointer hover:underline"
+                    className="font-semibold text-gray-900 cursor-pointer hover:underline truncate"
                     onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}
                   >
                     {nameAuthor || "Người dùng"}
                   </p>
                   {author?.type === "Shop" && (
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge variant="secondary" className="text-xs flex-shrink-0">
                       Shop
                     </Badge>
                   )}
+
+                  {/* Nút Follow - chỉ hiển thị khi user đã login và không phải chính mình */}
+                  {user && user._id !== author?._id?._id && (
+                    <Button
+                      onClick={handleToggleFollow}
+                      disabled={followLoading}
+                      size="sm"
+                      variant={isFollowing ? "secondary" : "default"}
+                      className={`ml-2 h-7 px-3 text-xs flex-shrink-0 ${isFollowing
+                        ? "bg-gray-100 hover:bg-gray-200 text-gray-700"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                        }`}
+                    >
+                      {followLoading ? (
+                        <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-1" />
+                      ) : isFollowing ? (
+                        <UserCheck className="w-3 h-3 mr-1" />
+                      ) : (
+                        <UserPlus className="w-3 h-3 mr-1" />
+                      )}
+                      {followLoading ? "..." : isFollowing ? "Đang theo dõi" : "Theo dõi"}
+                    </Button>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+                <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="cursor-pointer hover:text-gray-700">
-                          {formatDistanceToNow(new Date(createdAt), { addSuffix: true, locale: vi }).replace(
-                            /^khoảng /,
-                            "",
-                          )}
+                          {timePosted}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent>
@@ -302,7 +439,7 @@ export default function FeedItem({ post }) {
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -310,7 +447,21 @@ export default function FeedItem({ post }) {
                 <DropdownMenuItem>Quan tâm</DropdownMenuItem>
                 <DropdownMenuItem>Không quan tâm</DropdownMenuItem>
                 <DropdownMenuItem>Ẩn bài viết</DropdownMenuItem>
-                <DropdownMenuItem>Lưu bài viết</DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={handleToggleSave}
+                  disabled={saveLoading}
+                  className="flex items-center gap-2"
+                >
+                  {saveLoading ? (
+                    <div className="w-4 h-4 border border-current border-t-transparent rounded-full animate-spin" />
+                  ) : isSaved ? (
+                    <BookmarkCheck className="w-4 h-4" />
+                  ) : (
+                    <Bookmark className="w-4 h-4" />
+                  )}
+                  {saveLoading ? "Đang xử lý..." : isSaved ? "Bỏ lưu bài viết" : "Lưu bài viết"}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -361,10 +512,7 @@ export default function FeedItem({ post }) {
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="cursor-pointer hover:text-gray-700">
-                            {formatDistanceToNow(new Date(sharedPost?.createdAt), {
-                              addSuffix: true,
-                              locale: vi,
-                            }).replace(/^khoảng /, "")}
+                            {timeShared}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
@@ -521,9 +669,8 @@ export default function FeedItem({ post }) {
             <Button
               onClick={handleLike}
               variant="ghost"
-              className={`flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
-                liked ? "text-red-500 bg-red-50 hover:bg-red-100" : "text-gray-700 hover:bg-gray-100"
-              }`}
+              className={`flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${liked ? "text-red-500 bg-red-50 hover:bg-red-100" : "text-gray-700 hover:bg-gray-100"
+                }`}
             >
               <Heart className={`w-5 h-5 ${liked ? "fill-red-500" : ""}`} />
               <span className="font-medium">Thích</span>

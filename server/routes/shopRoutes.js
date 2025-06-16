@@ -9,6 +9,8 @@ router.post('/switch-role', verifyToken, setActor, shopController.switchUserRole
 
 // Tạo và quản lý shop
 router.post('/', verifyToken, setActor, requireRole(['buyer', 'seller']), shopController.createShop);
+// router.post('/', shopController.createShop);
+
 router.put('/', verifyToken, setActor, requireRole('seller'), checkShopOwnership, shopController.updateShop);
 router.post('/request-delete', verifyToken, setActor, requireRole('seller'), shopController.requestDeleteShop);
 router.patch('/toggle-status', verifyToken, setActor, requireRole('seller'), shopController.toggleShopActiveStatus);

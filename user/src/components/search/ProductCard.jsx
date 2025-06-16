@@ -34,9 +34,9 @@ const ProductCard = ({ product, onProductClick }) => {
                         src={product.images?.[0] || "/placeholder.svg?height=200&width=200"}
                         alt={product.name}
                         className="w-full h-48 object-cover rounded-lg"
-                        onError={(e) => {
-                            e.target.src = "/placeholder.svg?height=200&width=200&text=No+Image"
-                        }}
+                        // onError={(e) => {
+                        //     e.target.src = "/placeholder.svg?height=200&width=200&text=No+Image"
+                        // }}
                     />
                     {product.discount > 0 && <Badge className="absolute top-2 left-2 bg-red-500">-{product.discount}%</Badge>}
                     <div className="absolute bottom-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">

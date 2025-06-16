@@ -39,7 +39,7 @@ const postSchema = new mongoose.Schema({
 
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
-});
+}, { timestamps: true });
 
 // Pre-validate middleware để tự động cập nhật categories từ mainCategory
 postSchema.pre('validate', async function (next) {

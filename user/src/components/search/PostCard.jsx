@@ -85,9 +85,9 @@ const PostCard = ({ post, onPostClick, onLike, onComment, onShare }) => {
                                         src={image || "/placeholder.svg?height=150&width=200"}
                                         alt={`Post image ${index + 1}`}
                                         className="rounded-lg object-cover h-32 w-full"
-                                        onError={(e) => {
-                                            e.target.src = "/placeholder.svg?height=150&width=200&text=No+Image"
-                                        }}
+                                        // onError={(e) => {
+                                        //     e.target.src = "/placeholder.svg?height=150&width=200&text=No+Image"
+                                        // }}
                                     />
                                 ))}
                                 {post.images.length > 4 && (

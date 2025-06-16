@@ -138,6 +138,7 @@ exports.switchUserRole = async (req, res) => {
 exports.createShop = async (req, res) => {
     try {
         const userId = req.user.userId;
+        // const userId = req.body.owner;
         const existingUser = await User.findById(userId);
         if (!existingUser) return errorResponse(res, 'Người dùng không tồn tại', 404);
 

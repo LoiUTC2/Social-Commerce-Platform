@@ -8,34 +8,72 @@ import FeedItem from "../../components/feed/FeedItem"
 import ProductsTab from "../../components/marketplace/ProductsTab"
 import { useEffect, useState, useCallback, useRef } from "react"
 import { getPostsByAuthorSlug } from "../../services/postService"
+import { getSavedPosts } from "../../services/savedPostService"
 import { useAuth } from "../../contexts/AuthContext"
 import { MapPin, Calendar, Users, Store, Heart, MessageCircle, Verified } from "lucide-react"
 import { useParams } from "react-router-dom"
 import { getShopBySlug } from "../../services/shopService"
 import { getUserBySlug } from "../../services/authService"
+import { toggleFollow } from "../../services/followService"
+import { useFollow } from "../../contexts/FollowContext"
 
 export default function Profile() {
   const { slug } = useParams();
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, setShowLoginModal } = useAuth()
   const [profileData, setProfileData] = useState(null)
   const [profileType, setProfileType] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState("posts")
+
+  const { getFollowStatus, updateFollowStatus } = useFollow()
+  const [isFollowing, setIsFollowing] = useState(false)
+  const [followLoading, setFollowLoading] = useState(false)
+  const [followersCount, setFollowersCount] = useState(0)
+
+
   const [userPosts, setUserPosts] = useState([])
   const [postsLoading, setPostsLoading] = useState(false)
-  const [profileLoading, setProfileLoading] = useState(true)
   const [hasMorePosts, setHasMorePosts] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
-  const [activeTab, setActiveTab] = useState("posts")
   const [postsInitialized, setPostsInitialized] = useState(false) // Thêm flag để tránh load posts nhiều lần
 
+  const [savedPosts, setSavedPosts] = useState([])
+  const [savedPostsLoading, setSavedPostsLoading] = useState(false)
+  const [hasMoreSavedPosts, setHasMoreSavedPosts] = useState(true)
+  const [currentSavedPage, setCurrentSavedPage] = useState(1)
+  const [savedPostsInitialized, setSavedPostsInitialized] = useState(false)
+
   const lastPostElementRef = useRef()
+  const lastSavedPostElementRef = useRef()
   const isOwnProfile = currentUser?.slug === slug
 
   const profileStats = {
-    postsCount: userPosts.length,
-    followersCount: profileData?.followers?.length || profileData?.stats?.followers?.length || 0,
+    postsCount: userPosts.length || 0,
+    followersCount: followersCount || profileData?.followers?.length || profileData?.stats?.followers?.length || 0,
     followingCount: profileData?.following?.length || 0,
     likesReceived: 1250,
   }
+
+  //load trạng thái follow
+  const loadFollowStatus = useCallback(async () => {
+    if (!currentUser || !profileData || isOwnProfile) return
+
+    try {
+      const status = await getFollowStatus(profileData._id, profileType)
+      setIsFollowing(status)
+    } catch (error) {
+      console.error("Lỗi khi kiểm tra trạng thái follow:", error)
+    }
+  }, [currentUser, profileData, profileType, isOwnProfile, getFollowStatus])
+
+  //useEffect để load trạng thái follow
+  useEffect(() => {
+    if (profileData && currentUser && !isOwnProfile) {
+      loadFollowStatus()
+    }
+  }, [profileData, currentUser, loadFollowStatus])
+
+  ///////////////////
 
   // Optimize loadProfileData - loại bỏ dependency không cần thiết
   const loadProfileData = useCallback(async () => {
@@ -76,6 +114,9 @@ export default function Profile() {
     }
   }, [slug]) // Chỉ phụ thuộc vào slug
 
+
+  ////////////////////
+
   // Optimize loadPosts - tránh recreate function không cần thiết
   const loadPosts = useCallback(
     async (page = 1, reset = false) => {
@@ -84,16 +125,17 @@ export default function Profile() {
       setPostsLoading(true)
       try {
         const res = await getPostsByAuthorSlug(slug, page, 5)
-        console.log(`Tải trang ${page}:`, res.data)
+        console.log('Posts API Response:', res.data)
+        console.log('Posts array:', res.data?.posts)
 
         if (reset) {
-          setUserPosts(res.data?.data || [])
+          setUserPosts(res.data?.posts || [])
           setCurrentPage(1) // Reset currentPage khi reset posts
         } else {
-          setUserPosts((prev) => [...prev, ...(res.data?.data || [])])
+          setUserPosts((prev) => [...prev, ...(res.data?.posts || [])])
         }
 
-        setHasMorePosts(res.data?.hasMore || false)
+        setHasMorePosts(res.data?.pagination?.hasMore || false)
       } catch (err) {
         console.error("Lỗi khi tải bài viết:", err)
       } finally {
@@ -122,6 +164,59 @@ export default function Profile() {
     [postsLoading, hasMorePosts, currentPage, loadPosts],
   )
 
+  ///////////////////
+
+  const loadSavedPosts = useCallback(
+    async (page = 1, reset = false) => {
+      if (savedPostsLoading) return
+
+      setSavedPostsLoading(true)
+      try {
+        const res = await getSavedPosts(page, 5)
+        console.log('Saved Posts API Response:', res.data)
+        console.log('Posts:', res.data?.posts)
+
+        if (reset) {
+          setSavedPosts(res.data?.posts || [])
+          setCurrentSavedPage(1)
+        } else {
+          setSavedPosts((prev) => [...prev, ...(res.data?.posts || [])])
+        }
+
+        // Kiểm tra hasMore từ pagination
+        const pagination = res.data?.pagination
+        if (pagination) {
+          setHasMoreSavedPosts(pagination.currentPage < pagination.totalPages)
+        } else {
+          setHasMoreSavedPosts(false)
+        }
+      } catch (err) {
+        console.error("Lỗi khi tải bài viết đã lưu:", err)
+      } finally {
+        setSavedPostsLoading(false)
+      }
+    },
+    [], // Không cần dependencies để tránh vòng lặp
+  )
+
+  const lastSavedPostObserver = useCallback(
+    (node) => {
+      if (savedPostsLoading) return
+      if (lastSavedPostElementRef.current) lastSavedPostElementRef.current.disconnect()
+
+      lastSavedPostElementRef.current = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && hasMoreSavedPosts && !savedPostsLoading) {
+          const nextPage = currentSavedPage + 1
+          setCurrentSavedPage(nextPage)
+          loadSavedPosts(nextPage)
+        }
+      })
+
+      if (node) lastSavedPostElementRef.current.observe(node)
+    },
+    [savedPostsLoading, hasMoreSavedPosts, currentSavedPage, loadSavedPosts],
+  )
+
   // Load profile data chỉ khi slug thay đổi
   useEffect(() => {
     if (slug) {
@@ -134,26 +229,87 @@ export default function Profile() {
       setCurrentPage(1)
       setHasMorePosts(true)
 
+      // Reset saved posts state
+      setSavedPosts([])
+      setSavedPostsInitialized(false)
+      setCurrentSavedPage(1)
+      setHasMoreSavedPosts(true)
+
+      // Reset follow state
+      setIsFollowing(false)
+      setFollowLoading(false)
+      setFollowersCount(0)
+
       loadProfileData()
     }
   }, [slug]) // Chỉ phụ thuộc vào slug
 
-  // Load posts chỉ khi cần thiết và tránh gọi nhiều lần
+  //useEffect để set initial followersCount
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+    if (profileData) {
+      const initialFollowersCount = profileData?.followers?.length ||
+        profileData?.stats?.followers?.length || 0
+      setFollowersCount(initialFollowersCount)
+    }
+  }, [profileData])
+
+  // Load posts chỉ khi cần thiết
+  useEffect(() => {
     if (profileData && activeTab === "posts" && !postsInitialized) {
       setPostsInitialized(true)
       setCurrentPage(1)
       setUserPosts([])
       loadPosts(1, true)
     }
-  }, [profileData, activeTab, postsInitialized, loadPosts])
+  }, [profileData, activeTab, postsInitialized])
 
-  // Handle tab change - reset posts khi chuyển về tab posts
+  // Load saved posts chỉ khi cần thiết
+  useEffect(() => {
+    if (profileData && activeTab === "saved" && !savedPostsInitialized && isOwnProfile) {
+      setSavedPostsInitialized(true)
+      setCurrentSavedPage(1)
+      setSavedPosts([])
+      loadSavedPosts(1, true)
+    }
+  }, [profileData, activeTab, savedPostsInitialized, isOwnProfile])
+
+
+  // Handle tab change
   const handleTabChange = (newTab) => {
     setActiveTab(newTab)
     if (newTab === "posts" && profileData) {
-      setPostsInitialized(false) // Reset flag để load lại posts
+      setPostsInitialized(false)
+    }
+    else if (newTab === "saved" && profileData && isOwnProfile) {
+      setSavedPostsInitialized(false)
+    }
+  }
+
+  // Function để xử lý follow/unfollow
+  const handleToggleFollow = async () => {
+    if (!currentUser || !profileData || followLoading) return
+
+    setFollowLoading(true)
+    try {
+      const response = await toggleFollow({
+        targetId: profileData._id,
+        targetType: profileType
+      })
+
+      const newFollowStatus = response.data.isFollowing
+      setIsFollowing(newFollowStatus)
+      setFollowersCount(response.data.followerCount)
+
+      // Cập nhật context cache
+      updateFollowStatus(profileData._id, profileType, newFollowStatus)
+
+      // Hiển thị thông báo thành công (có thể dùng toast)
+      console.log(response.message)
+    } catch (error) {
+      console.error("Lỗi khi toggle follow:", error)
+      // Hiển thị thông báo lỗi
+    } finally {
+      setFollowLoading(false)
     }
   }
 
@@ -334,15 +490,42 @@ export default function Profile() {
                 </div>
 
                 {/* Action Buttons */}
-                {!isOwnProfile && (
+                {!isOwnProfile && currentUser && (
                   <div className="flex gap-3 mt-4 md:mt-0">
                     <Button variant="outline" className="flex items-center gap-2">
                       <MessageCircle className="w-4 h-4" />
                       Nhắn tin
                     </Button>
-                    <Button className="flex items-center gap-2">
+                    <Button
+                      onClick={handleToggleFollow}
+                      disabled={followLoading}
+                      className={`flex items-center gap-2 transition-colors ${isFollowing
+                          ? 'bg-gray-500 hover:bg-gray-600 text-white'
+                          : 'bg-blue-500 hover:bg-blue-600 text-white'
+                        }`}
+                    >
+                      {followLoading ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      ) : (
+                        <Heart className={`w-4 h-4 ${isFollowing ? 'fill-current' : ''}`} />
+                      )}
+                      {followLoading ? 'Đang xử lý...' : (isFollowing ? 'Đang theo dõi' : 'Theo dõi')}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Hiển thị nút đăng nhập nếu chưa đăng nhập */}
+                {!isOwnProfile && !currentUser && (
+                  <div className="flex gap-3 mt-4 md:mt-0">
+                    <Button
+                      variant="outline"
+                      className="flex items-center gap-2"
+                      onClick={() => {
+                        setShowLoginModal(true)
+                      }}
+                    >
                       <Heart className="w-4 h-4" />
-                      Theo dõi
+                      Đăng nhập để theo dõi
                     </Button>
                   </div>
                 )}
@@ -378,7 +561,7 @@ export default function Profile() {
                 ℹ️ Giới thiệu
               </TabsTrigger>
 
-              {isOwnProfile && profileType === 'user' && (
+              {isOwnProfile && (
                 <TabsTrigger
                   value="saved"
                   className="flex items-center gap-2 px-6 py-2 rounded-lg data-[state=active]:bg-blue-500 data-[state=active]:text-white"
@@ -436,15 +619,53 @@ export default function Profile() {
           </TabsContent>
 
           {/* Saved Tab */}
-          {isOwnProfile && profileType === 'user' && (
-            <TabsContent value="saved">
-              <Card>
-                <CardContent className="p-12 text-center">
-                  <div className="text-6xl mb-4">🔖</div>
-                  <h3 className="text-xl font-semibold mb-2">Chưa có bài viết đã lưu</h3>
-                  <p className="text-gray-600">Những bài viết bạn lưu sẽ xuất hiện ở đây.</p>
-                </CardContent>
-              </Card>
+          {isOwnProfile && (
+            <TabsContent value="saved" className="space-y-4">
+              {savedPosts.length > 0 ? (
+                <>
+                  {savedPosts.map((savedPost, index) => {
+                    const post = savedPost; // Lấy post từ savedPost object
+                    if (savedPosts.length === index + 1) {
+                      return (
+                        <div ref={lastSavedPostObserver} key={savedPost._id}>
+                          <FeedItem post={post} />
+                        </div>
+                      )
+                    } else {
+                      return <FeedItem key={savedPost._id} post={post} />
+                    }
+                  })}
+
+                  {savedPostsLoading && (
+                    <div className="flex justify-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                    </div>
+                  )}
+
+                  {!hasMoreSavedPosts && savedPosts.length > 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <p>🎉 Bạn đã xem hết tất cả bài viết đã lưu!</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="p-12 text-center">
+                    <div className="text-6xl mb-4">🔖</div>
+                    <h3 className="text-xl font-semibold mb-2">
+                      {savedPostsLoading ? "Đang tải..." : "Chưa có bài viết đã lưu"}
+                    </h3>
+                    <p className="text-gray-600">
+                      {savedPostsLoading ? "Vui lòng chờ..." : "Những bài viết bạn lưu sẽ xuất hiện ở đây."}
+                    </p>
+                    {savedPostsLoading && (
+                      <div className="flex justify-center mt-4">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
             </TabsContent>
           )}
 

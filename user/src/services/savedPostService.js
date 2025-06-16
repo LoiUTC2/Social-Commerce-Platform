@@ -1,18 +1,12 @@
 import api from '../utils/api';
 
-// ✅ Lưu bài viết
-export const savePost = async (postId) => {
-    const res = await api.post(`/saved-posts/${postId}`);
+// ✅ Toggle lưu / bỏ lưu bài viết
+export const toggleSavePost = async (postId) => {
+    const res = await api.post(`/saved-posts/toggle/${postId}`);
     return res.data;
 };
 
-// ❌ Bỏ lưu bài viết
-export const unsavePost = async (postId) => {
-    const res = await api.delete(`/saved-posts/${postId}`);
-    return res.data;
-};
-
-// 📥 Lấy danh sách bài viết đã lưu (phân trang)
+// 📥 Lấy danh sách bài viết đã lưu (có phân trang)
 export const getSavedPosts = async (page = 1, limit = 10) => {
     const res = await api.get('/saved-posts', {
         params: { page, limit },

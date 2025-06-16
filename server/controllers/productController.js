@@ -9,6 +9,12 @@ const ProductReviews = require('../models/ProductReviews');
 const Hashtag = require('../models/Hashtags');
 const geoip = require('geoip-lite');
 
+const {
+    getHybridRecommendations,
+    getCollaborativeRecommendations,
+    getContentBasedRecommendations
+} = require('../services/recommendationService');
+
 //Tạo slug khác biệt
 const generateUniqueSlug = async (name) => {
     let slug = slugify(name, { lower: true, strict: true, remove: /[*+~.()'"!:@]/g });
@@ -74,13 +80,14 @@ async function handleHashtagsUpdate(productId, hashtags = [], createdById) {
 exports.createProduct = async (req, res) => {
     try {
         const sellerId = req.actor._id.toString(); //này là 1 shopId nhé, có middle ware check hết rồi nên bây giờ chắc chắn là seller(dùng shopId), còn model seller chỉ là thông tin bổ trợ cho shop thôi
+        // const sellerId = req.body.seller; //Dùng để tạo dữ liệu ảo bằng runder postman
 
         const sessionId = req.sessionId;
         const ip = req.ip;
         const userAgent = req.headers['user-agent'];
 
-        const slug = await generateUniqueSlug(req.body.name);
-        const sku = await generateSKU(req.body.name, sellerId);
+        // const slug = await generateUniqueSlug(req.body.name);
+        // const sku = await generateSKU(req.body.name, sellerId);
 
         const requiredFields = ['name', 'description', 'price', 'stock', 'mainCategory'];
         for (const field of requiredFields) {
@@ -107,6 +114,50 @@ exports.createProduct = async (req, res) => {
             return errorResponse(res, 'Số lượng tồn kho phải là số không âm', 400);
         }
 
+        // Xử lý và validate variants
+        let processedVariants = [];
+        if (req.body.variants && Array.isArray(req.body.variants)) {
+            processedVariants = req.body.variants.filter(variant => {
+                // Kiểm tra name nghiêm ngặt hơn
+                if (!variant.name ||
+                    typeof variant.name !== 'string' ||
+                    variant.name.trim() === '' ||
+                    variant.name.trim().length === 0 ||
+                    /^\s*$/.test(variant.name)) { // Thêm regex để kiểm tra chỉ có khoảng trắng
+                    console.log('Loại bỏ variant vì name không hợp lệ:', variant.name); // Debug log
+                    return false;
+                }
+
+                // Loại bỏ variant nếu options rỗng hoặc không phải array
+                if (!variant.options || !Array.isArray(variant.options) || variant.options.length === 0) {
+                    console.log('Loại bỏ variant vì options không hợp lệ:', variant.options); // Debug log
+                    return false;
+                }
+
+                // Lọc bỏ các options rỗng trong variant
+                variant.options = variant.options.filter(option =>
+                    option &&
+                    typeof option === 'string' &&
+                    option.trim() !== '' &&
+                    option.trim().length > 0
+                );
+
+                // Loại bỏ variant nếu sau khi lọc options thì không còn options nào
+                if (variant.options.length === 0) {
+                    console.log('Loại bỏ variant vì không còn options hợp lệ'); // Debug log
+                    return false;
+                }
+
+                return true;
+            }).map(variant => ({
+                name: variant.name.trim(),
+                options: variant.options.map(option => option.trim())
+            }));
+        }
+
+        // Thêm log để debug
+        console.log('Variants sau khi xử lý:', processedVariants);
+
         // Kiểm tra danh mục tồn tại
         const mainCategory = await Category.findById(req.body.mainCategory);
         console.log('mainCategory:', sellerId);
@@ -120,7 +171,7 @@ exports.createProduct = async (req, res) => {
             seller: sellerId,
             name: req.body.name,
             // slug, //model tự tạo 
-            sku: sku, // model tự tạo
+            // sku: sku, // model tự tạo
             description: req.body.description,
             price: req.body.price,
             stock: req.body.stock,
@@ -130,7 +181,7 @@ exports.createProduct = async (req, res) => {
             discount: req.body.discount || 0,
             brand: req.body.brand,
             condition: req.body.condition || 'new',
-            variants: req.body.variants || [],
+            variants: processedVariants,
             allowPosts: req.body.allowPosts,
             hashtags: req.body.hashtags || [],
             isActive: true,
@@ -556,111 +607,411 @@ exports.getFeaturedProducts = async (req, res) => {
 
 //Lấy danh sách sản phẩm gợi ý (dựa theo hành vi UserInteraction + random fallback)
 exports.getSuggestedProducts = async (req, res) => {
-    const { page = 1, limit = 20 } = req.query;
-    const userId = req.actor._id.toString();;
+    const { page = 1, limit = 20, method = 'hybrid' } = req.query;
+    const userId = req.actor?._id?.toString();
+    const sessionId = req.sessionId || req.ip; // Fallback cho anonymous users
+    const userRole = req.actor?.type || 'user';
     const parsedLimit = parseInt(limit);
     const skipCount = (parseInt(page) - 1) * parsedLimit;
 
     try {
-        let products;
-        let total;
+        let aiRecommendations = [];
+        let products = [];
+        let total = 0;
 
-        if (userId) {
-            // Lấy các danh mục và hashhashtags từ sản phẩm mà user đã tương tác
-            const interactions = await UserInteraction.find({
-                userId,
-                targetType: 'product',
-                action: { $in: ['click', 'view', 'like', 'purchase'] }
-            }).sort({ timestamp: -1 }).limit(50);
+        // Thêm timeout cho AI recommendation system
+        const AI_TIMEOUT = 15000; // 15 giây
+        
+        try {
+            console.log(`🤖 Bắt đầu AI recommendation với method: ${method}`);
+            
+            // Tạo promise với timeout
+            const aiPromise = new Promise(async (resolve, reject) => {
+                try {
+                    let recommendations = [];
+                    
+                    switch (method) {
+                        case 'collaborative':
+                            recommendations = await getCollaborativeRecommendations(
+                                userId,
+                                sessionId,
+                                parsedLimit * 2, // Lấy nhiều hơn để filter
+                                userRole
+                            );
+                            break;
 
-            const productIds = interactions.map(i => i.targetId);
+                        case 'content':
+                            // Lấy sản phẩm đã tương tác gần nhất để làm base cho content-based
+                            const recentInteraction = await UserInteraction.findOne({
+                                $or: [
+                                    { 'author._id': userId },
+                                    { sessionId: sessionId }
+                                ],
+                                targetType: 'product',
+                                action: { $in: ['view', 'like', 'purchase', 'add_to_cart'] }
+                            }).sort({ timestamp: -1 });
 
-            const interactedProducts = await Product.find({ _id: { $in: productIds } });
+                            if (recentInteraction) {
+                                const contentBasedIds = await getContentBasedRecommendations(
+                                    recentInteraction.targetId.toString(),
+                                    parsedLimit * 2
+                                );
 
-            const hashtagset = new Set();
-            const categorySet = new Set();
+                                // Convert IDs to objects with type
+                                recommendations = contentBasedIds.map(id => ({
+                                    _id: id,
+                                    type: 'product'
+                                }));
+                            } else {
+                                // Fallback nếu không có interaction gần đây
+                                recommendations = await getContentBasedRecommendationsFromUserHistory(
+                                    userId,
+                                    sessionId,
+                                    parsedLimit * 2
+                                );
+                                recommendations = recommendations.map(id => ({
+                                    _id: id,
+                                    type: 'product'
+                                }));
+                            }
+                            break;
 
-            interactedProducts.forEach(p => {
-                p.hashtags?.forEach(tag => hashtagset.add(tag));
-                p.categories?.forEach(cat => categorySet.add(cat.toString()));
+                        case 'hybrid':
+                        default:
+                            recommendations = await getHybridRecommendations(
+                                userId,
+                                sessionId,
+                                parsedLimit * 2,
+                                userRole
+                            );
+                            break;
+                    }
+                    
+                    resolve(recommendations);
+                } catch (error) {
+                    reject(error);
+                }
             });
 
-            // Tìm các sản phẩm có cùng hashtags hoặc categories
-            products = await Product.find({
-                isActive: true,
-                $or: [
-                    { hashtags: { $in: Array.from(hashtagset) } },
-                    { categories: { $in: Array.from(categorySet).map(id => mongoose.Types.ObjectId(id)) } }
-                ],
-                _id: { $nin: productIds } // Loại bỏ các sản phẩm đã tương tác
-            })
-                .populate('mainCategory', 'name slug')
-                .populate('seller', 'username shopName avatar')
-                .sort({ 'ratings.avg': -1, soldCount: -1 })
-                .skip(skipCount)
-                .limit(parsedLimit);
-
-            total = await Product.countDocuments({
-                isActive: true,
-                $or: [
-                    { hashtags: { $in: Array.from(hashtagset) } },
-                    { categories: { $in: Array.from(categorySet).map(id => mongoose.Types.ObjectId(id)) } }
-                ],
-                _id: { $nin: productIds }
+            // Race between AI promise and timeout
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('AI recommendation timeout')), AI_TIMEOUT);
             });
 
-            // Nếu không đủ sản phẩm, fallback sang random
-            if (products.length < parsedLimit) {
-                const extraProducts = await Product.aggregate([
-                    {
-                        $match: {
-                            isActive: true,
-                            _id: { $nin: [...productIds, ...products.map(p => p._id)] }
-                        }
-                    },
-                    { $sample: { size: parsedLimit - products.length } }
-                ]);
+            aiRecommendations = await Promise.race([aiPromise, timeoutPromise]);
+            console.log(`🤖 AI Recommendations (${method}):`, aiRecommendations.length);
 
-                // Populate các trường cần thiết cho các sản phẩm từ aggregation
-                if (extraProducts.length > 0) {
-                    const extraProductIds = extraProducts.map(p => p._id);
-                    const populatedExtra = await Product.find({ _id: { $in: extraProductIds } })
+        } catch (aiError) {
+            console.error(`❌ AI Recommendation Error (${method}):`, aiError.message);
+            
+            // Nếu timeout, log cảnh báo đặc biệt
+            if (aiError.message.includes('timeout')) {
+                console.warn(`⏰ AI recommendation timeout sau ${AI_TIMEOUT}ms, chuyển sang fallback`);
+            }
+            
+            // Fallback to traditional method if AI fails
+            aiRecommendations = [];
+        }
+
+        // Filter và lấy thông tin chi tiết cho products từ AI recommendations
+        if (aiRecommendations.length > 0) {
+            // Cải thiện logic filter - chỉ lấy products hoặc items có thể convert thành products
+            const productRecommendations = aiRecommendations.filter(item => {
+                // Kiểm tra type trực tiếp
+                if (item.type === 'product') return true;
+                
+                // Kiểm tra có mainCategory (dấu hiệu của product)
+                if (item.mainCategory) return true;
+                
+                // Kiểm tra có các field đặc trưng của product
+                if (item.price !== undefined || item.soldCount !== undefined || item.ratings) return true;
+                
+                return false;
+            });
+
+            // Lấy product IDs và đảm bảo chúng hợp lệ
+            const productIds = productRecommendations
+                .map(item => {
+                    const id = item._id || item.id;
+                    // Kiểm tra định dạng ObjectId
+                    if (id && typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)) {
+                        return id;
+                    } else if (id && id.toString && /^[0-9a-fA-F]{24}$/.test(id.toString())) {
+                        return id.toString();
+                    }
+                    return null;
+                })
+                .filter(id => id !== null) // Loại bỏ IDs không hợp lệ
+                .slice(skipCount, skipCount + parsedLimit);
+
+            if (productIds.length > 0) {
+                try {
+                    products = await Product.find({
+                        _id: { $in: productIds },
+                        isActive: true
+                    })
                         .populate('mainCategory', 'name slug')
-                        .populate('seller', 'username shopName avatar');
+                        .populate('seller', 'username shopName avatar')
+                        .lean();
 
-                    products = [...products, ...populatedExtra];
+                    // Sắp xếp theo thứ tự AI recommendations và thêm hybridScore nếu có
+                    products = productIds.map(id => {
+                        const product = products.find(p => p._id.toString() === id);
+                        if (product) {
+                            // Tìm hybridScore từ AI recommendation
+                            const aiRec = aiRecommendations.find(rec => 
+                                (rec._id || rec.id)?.toString() === id
+                            );
+                            if (aiRec && aiRec.hybridScore !== undefined) {
+                                product.hybridScore = aiRec.hybridScore;
+                            }
+                        }
+                        return product;
+                    }).filter(p => p); // Remove null values
+
+                    total = productRecommendations.length;
+                    
+                    console.log(`✅ Lấy được ${products.length} sản phẩm từ AI recommendations`);
+                } catch (dbError) {
+                    console.error('❌ Lỗi khi query products từ AI recommendations:', dbError);
+                    products = [];
                 }
             }
-        } else {
-            // Fallback cho khách (random + featured mix)
-            const featuredProducts = await Product.find({ isActive: true })
-                .populate('mainCategory', 'name slug')
-                .populate('seller', 'username shopName avatar')
-                .sort({ 'ratings.avg': -1, soldCount: -1 })
-                .limit(parsedLimit / 2);
-
-            const randomProducts = await Product.aggregate([
-                {
-                    $match: {
-                        isActive: true,
-                        _id: { $nin: featuredProducts.map(p => p._id) }
-                    }
-                },
-                { $sample: { size: parsedLimit - featuredProducts.length } }
-            ]);
-
-            // Populate cho randomProducts
-            const randomProductIds = randomProducts.map(p => p._id);
-            const populatedRandom = await Product.find({ _id: { $in: randomProductIds } })
-                .populate('mainCategory', 'name slug')
-                .populate('seller', 'username shopName avatar');
-
-            products = [...featuredProducts, ...populatedRandom];
-            total = await Product.countDocuments({ isActive: true });
         }
+
+        // Cải thiện fallback logic
+        if (products.length < parsedLimit) {
+            console.log(`🔄 Fallback: Cần thêm ${parsedLimit - products.length} sản phẩm`);
+
+            const remainingLimit = parsedLimit - products.length;
+            const existingProductIds = products.map(p => p._id);
+
+            let fallbackProducts = [];
+
+            // Fallback strategy 1: Dựa trên lịch sử tương tác của user
+            if (userId) {
+                try {
+                    const interactions = await UserInteraction.find({
+                        'author._id': userId,
+                        targetType: 'product',
+                        action: { $in: ['view', 'like', 'purchase', 'add_to_cart'] }
+                    }).sort({ timestamp: -1 }).limit(50);
+
+                    const interactedProductIds = interactions
+                        .map(i => i.targetId)
+                        .filter(id => id && /^[0-9a-fA-F]{24}$/.test(id.toString()));
+
+                    if (interactedProductIds.length > 0) {
+                        const interactedProducts = await Product.find({
+                            _id: { $in: interactedProductIds }
+                        }).select('hashtags categories mainCategory');
+
+                        const hashtagSet = new Set();
+                        const categorySet = new Set();
+
+                        interactedProducts.forEach(p => {
+                            p.hashtags?.forEach(tag => hashtagSet.add(tag));
+                            if (p.categories) {
+                                p.categories.forEach(cat => categorySet.add(cat.toString()));
+                            }
+                            if (p.mainCategory) {
+                                categorySet.add(p.mainCategory.toString());
+                            }
+                        });
+
+                        // Tìm sản phẩm tương tự với scoring
+                        if (hashtagSet.size > 0 || categorySet.size > 0) {
+                            const similarProducts = await Product.find({
+                                isActive: true,
+                                _id: { $nin: [...existingProductIds, ...interactedProductIds] },
+                                $or: [
+                                    ...(hashtagSet.size > 0 ? [{ hashtags: { $in: Array.from(hashtagSet) } }] : []),
+                                    ...(categorySet.size > 0 ? [
+                                        { categories: { $in: Array.from(categorySet).map(id => {
+                                            try {
+                                                return mongoose.Types.ObjectId(id);
+                                            } catch {
+                                                return null;
+                                            }
+                                        }).filter(id => id) } },
+                                        { mainCategory: { $in: Array.from(categorySet).map(id => {
+                                            try {
+                                                return mongoose.Types.ObjectId(id);
+                                            } catch {
+                                                return null;
+                                            }
+                                        }).filter(id => id) } }
+                                    ] : [])
+                                ]
+                            })
+                                .populate('mainCategory', 'name slug')
+                                .populate('seller', 'username shopName avatar')
+                                .sort({ 
+                                    'ratings.avg': -1, 
+                                    soldCount: -1,
+                                    createdAt: -1
+                                })
+                                .limit(remainingLimit)
+                                .lean();
+
+                            fallbackProducts = similarProducts;
+                            console.log(`📊 Fallback strategy 1: ${fallbackProducts.length} sản phẩm tương tự`);
+                        }
+                    }
+                } catch (fallbackError) {
+                    console.error('❌ Lỗi fallback strategy 1:', fallbackError);
+                }
+            }
+
+            // Fallback strategy 2: Sản phẩm nổi bật nếu vẫn không đủ
+            if (fallbackProducts.length < remainingLimit) {
+                try {
+                    const extraNeeded = remainingLimit - fallbackProducts.length;
+                    const usedIds = [...existingProductIds, ...fallbackProducts.map(p => p._id)];
+
+                    const featuredProducts = await Product.find({
+                        isActive: true,
+                        _id: { $nin: usedIds }
+                    })
+                        .populate('mainCategory', 'name slug')
+                        .populate('seller', 'username shopName avatar')
+                        .sort({ 
+                            'ratings.avg': -1, 
+                            soldCount: -1,
+                            createdAt: -1 
+                        })
+                        .limit(extraNeeded)
+                        .lean();
+
+                    fallbackProducts = [...fallbackProducts, ...featuredProducts];
+                    console.log(`📊 Fallback strategy 2: Thêm ${featuredProducts.length} sản phẩm nổi bật`);
+                } catch (featuredError) {
+                    console.error('❌ Lỗi fallback strategy 2:', featuredError);
+                }
+            }
+
+            products = [...products, ...fallbackProducts];
+            total = Math.max(total, products.length);
+        }
+
+        // Đảm bảo không trả về quá số lượng yêu cầu
+        if (products.length > parsedLimit) {
+            products = products.slice(0, parsedLimit);
+        }
+
+        // Thêm metadata cho debugging
+        const metadata = {
+            method: method,
+            aiRecommendationsCount: aiRecommendations.length,
+            finalProductsCount: products.length,
+            userId: userId || 'anonymous',
+            sessionId: sessionId,
+            userRole: userRole,
+            timestamp: new Date().toISOString()
+        };
 
         return successResponse(res, "Gợi ý sản phẩm dành cho bạn", {
             products,
+            metadata,
+            pagination: {
+                page: parseInt(page),
+                limit: parsedLimit,
+                total,
+                totalPages: Math.ceil(total / parsedLimit)
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Error in getSuggestedProducts:', err);
+        
+        // Fallback cuối cùng: trả về sản phẩm phổ biến
+        try {
+            console.log('🆘 Final fallback: Trả về sản phẩm phổ biến');
+            const fallbackProducts = await Product.find({ isActive: true })
+                .populate('mainCategory', 'name slug')
+                .populate('seller', 'username shopName avatar')
+                .sort({ soldCount: -1, 'ratings.avg': -1 })
+                .skip(skipCount)
+                .limit(parsedLimit)
+                .lean();
+
+            return successResponse(res, "Gợi ý sản phẩm dành cho bạn (fallback)", {
+                products: fallbackProducts,
+                metadata: {
+                    method: 'fallback',
+                    error: err.message,
+                    timestamp: new Date().toISOString()
+                },
+                pagination: {
+                    page: parseInt(page),
+                    limit: parsedLimit,
+                    total: fallbackProducts.length,
+                    totalPages: Math.ceil(fallbackProducts.length / parsedLimit)
+                }
+            });
+        } catch (finalError) {
+            console.error('❌ Final fallback cũng thất bại:', finalError);
+            return errorResponse(res, "Lỗi khi lấy sản phẩm gợi ý", 500, err.message);
+        }
+    }
+};  
+
+// Lấy danh sách sản phẩm mới nhất
+exports.getLatestProducts = async (req, res) => {
+    const { page = 1, limit = 20, category, timeRange = 'all' } = req.query;
+    const parsedLimit = parseInt(limit);
+    const skipCount = (parseInt(page) - 1) * parsedLimit;
+
+    try {
+        const query = { isActive: true };
+
+        // Lọc theo danh mục nếu có
+        if (category) {
+            query.categories = mongoose.Types.ObjectId(category);
+        }
+
+        // Lọc theo khoảng thời gian nếu có
+        if (timeRange && timeRange !== 'all') {
+            const now = new Date();
+            let startDate;
+
+            switch (timeRange) {
+                case '24h':
+                    startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                    break;
+                case '7d':
+                    startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    break;
+                case '30d':
+                    startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    break;
+                case '90d':
+                    startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+                    break;
+                default:
+                    startDate = null;
+            }
+
+            if (startDate) {
+                query.createdAt = { $gte: startDate };
+            }
+        }
+
+        const products = await Product.find(query)
+            .populate('mainCategory', 'name slug')
+            .populate('seller', 'name slug avatar')
+            .sort({ createdAt: -1 }) // Sắp xếp theo thời gian tạo mới nhất
+            .skip(skipCount)
+            .limit(parsedLimit);
+
+        const total = await Product.countDocuments(query);
+
+        return successResponse(res, "Danh sách sản phẩm mới nhất", {
+            products,
+            filters: {
+                category: category || null,
+                timeRange
+            },
             pagination: {
                 page: parseInt(page),
                 limit: parsedLimit,
@@ -669,7 +1020,7 @@ exports.getSuggestedProducts = async (req, res) => {
             }
         });
     } catch (err) {
-        return errorResponse(res, "Lỗi khi lấy sản phẩm gợi ý", 500, err.message);
+        return errorResponse(res, "Lỗi khi lấy sản phẩm mới nhất", 500, err.message);
     }
 };
 

@@ -4,6 +4,7 @@ const Shop = require('../models/Shop');
 const Post = require('../models/Post');
 const User = require('../models/User');
 
+//Bắt buộc có token thì mới sử dụng
 exports.verifyToken = (req, res, next) => {
     const token = req?.cookies?.accessToken; // Lấy từ cookie, tại vì có gửi accessToken qua cookie khi đăng nhập, nên lấy được
     // const authHeader = req.headers.authorization; //nằm trong header có dạng Authorization: Bearer <token>
@@ -64,6 +65,7 @@ exports.setActor = async (req, res, next) => {
                 legalName: shop.seller?.legalName,
                 shopSlug: shop.slug,
                 userId: shop.owner,
+                sessionId: req.sessionId
             };
         } else {
             req.actor = {
@@ -73,6 +75,7 @@ exports.setActor = async (req, res, next) => {
                 avatar: user.avatar,
                 email: user.email,
                 shopId: user.shopId,
+                sessionId: req.sessionId
             };
         }
 
