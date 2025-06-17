@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/button"
 import { Card, CardContent } from "../../components/ui/card"
-import DailySuggestions from "../../components/marketplace/DailySuggestions"
+import SuggestedProducts from '../../components/marketplace/products/SuggestedProducts';
 import { getProductDetailForUser } from "../../services/productService"
 import { Heart, Share2, ShoppingCart, MessageCircle, Star, Truck, Shield, RotateCcw, Award } from "lucide-react"
 import { toast } from "sonner"
@@ -882,7 +882,7 @@ export default function ProductDetail() {
         {/* Daily Suggestions */}
         <section className="mt-8">
           <h2 className="text-xl font-bold text-gray-900 mb-6">Có thể bạn cũng thích</h2>
-          <DailySuggestions />
+          <SuggestedProducts />
         </section>
       </div>
     </div>

@@ -288,5 +288,8 @@ shopSchema.index({ 'status.approvalCreateStatus': 1, 'status.isActive': 1 });
 shopSchema.index({ 'status.approvalDeleteStatus': 1, 'status.isActive': 1 });
 shopSchema.index({ owner: 1 });
 shopSchema.index({ seller: 1 });
+shopSchema.index({ 'stats.rating.avg': -1 });
+shopSchema.index({ 'stats.followers': -1 });
+shopSchema.index({ 'stats.views': -1 });
 
 module.exports = mongoose.model('Shop', shopSchema);

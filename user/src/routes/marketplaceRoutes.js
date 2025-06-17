@@ -5,6 +5,9 @@ import ProductDetail from '../pages/marketplace/ProductDetail';
 import CartPage from '../pages/marketplace/CartPage';
 import CheckoutPage from '../pages/marketplace/CheckoutPage';
 import PlaceMarketPage from '../pages/marketplace/PlaceMarketPage';
+import FeaturedProductsPage from '../pages/marketplace/placeMarketProduct/FeaturedProductsPage';
+import SuggestedProductsPage from '../pages/marketplace/placeMarketProduct/SuggestedProductsPage';
+import LatestProductsPage from '../pages/marketplace/placeMarketProduct/LatestProductsPage';
 
 const MarketplaceRoutes = (
   <Route path="/marketplace" element={<MainLayout />}>
@@ -12,6 +15,9 @@ const MarketplaceRoutes = (
     <Route path="/marketplace/products/:slug" element={<ProductDetail />} />
     <Route path="/marketplace/cart" element={<CartPage />} />
     <Route path="/marketplace/checkout" element={<CheckoutPage />} />
+    <Route path="/marketplace/featured-products" element={<FeaturedProductsPage />} />
+    <Route path="/marketplace/suggested-products" element={<SuggestedProductsPage />} />
+    <Route path="/marketplace/latest-products" element={<LatestProductsPage />} />
   </Route>
 );
 

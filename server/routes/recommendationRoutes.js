@@ -23,7 +23,7 @@ const { verifyToken, setActor } = require('../middleware/authMiddleware');
 const { requestLogger } = require('../middleware/requestLogger ');
 const UserInteraction = require('../models/UserInteraction');
 
-// Route lấy gợi ý chung (có thể là post, product, user, shop)
+// Route lấy gợi ý chung (có thể là post, product, user, shop), chủ yếu để test chứ frontend ko có dùng
 router.get('/', requestLogger, setActor, async (req, res) => {
     try {
         const { userId, sessionId, limit = 10 } = req.query;
@@ -49,7 +49,7 @@ router.get('/', requestLogger, setActor, async (req, res) => {
     }
 });
 
-// Route lấy gợi ý bài viết với error handling tốt hơn
+// Route lấy gợi ý bài viết với error handling tốt hơn ,CHỦ YẾU ĐỂ TEST postman, chứ frontend dùng trong postController
 router.get('/posts', requestLogger, setActor, async (req, res) => {
     try {
         const { userId, sessionId, limit = 10 } = req.query;
@@ -249,7 +249,7 @@ router.get('/posts', requestLogger, setActor, async (req, res) => {
     }
 });
 
-// Route lấy gợi ý sản phẩm với error handling tốt hơn
+// Route lấy gợi ý sản phẩm với error handling tốt hơn, CHỦ YẾU ĐỂ TEST postman, chứ frontend dùng trong productController
 router.get('/products', requestLogger, setActor, async (req, res) => {
     try {
         const { userId, sessionId, limit = 10 } = req.query;

@@ -439,7 +439,12 @@ exports.getShops = async (req, res) => {
 
         // Thêm điều kiện tìm kiếm
         if (search) {
-            query.$text = { $search: search };
+            const searchRegex = new RegExp(search.trim(), 'i');
+            query.$or = [
+                { name: searchRegex },
+                { description: searchRegex },
+                { hashtags: { $in: [searchRegex] } }
+            ];
         }
 
         // Thêm điều kiện lọc theo danh mục
@@ -471,8 +476,16 @@ exports.getShops = async (req, res) => {
             .sort(sortOption)
             .skip((page - 1) * limit)
             .limit(Number(limit))
-            .select('name slug avatar logo description stats hashtags status')
-            .populate('owner', 'fullName avatar');
+            .select('name slug avatar logo description stats hashtags status productInfo.mainCategory')
+            .populate('owner', 'fullName avatar')
+            .populate('productInfo.mainCategory', 'name slug');
+
+        if (category) {
+            if (!mongoose.Types.ObjectId.isValid(category)) {
+                return errorResponse(res, 'Category ID không hợp lệ', 400);
+            }
+            query['productInfo.mainCategory'] = new mongoose.Types.ObjectId(category);
+        }
 
         return successResponse(res, 'Lấy danh sách shop thành công', {
             shops,
@@ -481,6 +494,13 @@ exports.getShops = async (req, res) => {
                 page: Number(page),
                 limit: Number(limit),
                 totalPages: Math.ceil(total / limit)
+            },
+            filters: {
+                search: search || null,
+                category: category || null,
+                status: status || null,
+                sortBy,
+                order
             }
         });
     } catch (err) {

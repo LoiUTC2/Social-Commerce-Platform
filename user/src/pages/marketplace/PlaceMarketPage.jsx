@@ -1,29 +1,32 @@
 import React from 'react';
 import Banner from '../../components/marketplace/Banner';
 import FlashSale from '../../components/marketplace/FlashSale';
-import TopShops from '../../components/marketplace/TopShops';
-import DailySuggestions from '../../components/marketplace/DailySuggestions';
 import MarketplaceCategory from '../../components/marketplace/MarketplaceCategory';
-import ProductCard from '../../components/marketplace/ProductCard';
+import TopShops from "../../components/marketplace/shops/TopShops"
+import FeaturedProducts from '../../components/marketplace/products/FeaturedProducts';
+import SuggestedProducts from '../../components/marketplace/products/SuggestedProducts';
+import LatestProducts from '../../components/marketplace/products/LatestProducts';
+
 
 const PlaceMarketPage = () => {
   return (
-    <main className="w-full space-y-6">
+    <main className="w-full space-y-8 bg-gray-50">
       <Banner />
       <MarketplaceCategory />
       <FlashSale />
       <TopShops />
-      <section>
-        <h2 className="text-lg font-semibold mb-4 text-gray-800">🛒 Sản phẩm nổi bật</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {[...Array(8)].map((_, i) => (
-            <ProductCard key={i} i={i} />
-          ))}
-        </div>
-      </section>
-      <DailySuggestions />
-    </main>
-  );
-};
 
-export default PlaceMarketPage;
+      {/* Sản phẩm nổi bật */}
+      <FeaturedProducts limit={12} />
+
+      {/* Sản phẩm gợi ý với AI */}
+      <SuggestedProducts method="hybrid" limit={12} />
+
+      {/* Sản phẩm mới nhất trong 30 ngày */}
+      <LatestProducts timeRange="30d" limit={12} />
+
+    </main>
+  )
+}
+
+export default PlaceMarketPage
