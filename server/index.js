@@ -4,10 +4,10 @@ const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const cors = require('cors');
 require('dotenv').config();
-const connectDB = require('./config/database'); 
+const connectDB = require('./config/database');
 const cookieParser = require('cookie-parser');
 const { initializeCronJobs } = require('./services/cronJobs');
-const  SocketHandler = require('./socket/socketHandler');
+const SocketHandler = require('./socket/socketHandler');
 
 const app = express();
 
@@ -22,7 +22,7 @@ app.locals.socketHandler = socketHandler
 
 // app.use(cors());
 app.use(cors({
-  origin: 'http://localhost:3000', // địa chỉ frontend
+  origin: ['http://localhost:3000', 'http://localhost:3001'], // Mảng các địa chỉ được phép
   credentials: true, // QUAN TRỌNG để gửi cookie
 }));
 
@@ -71,10 +71,14 @@ const hashtagsRoutes = require('./routes/hashtagsRouter')
 const savedPostRoutes = require('./routes/savedPostRoutes');
 const followRoutes = require('./routes/followRoutes');
 const recommendationRoutes = require('./routes/recommendationRoutes');
+const flashSaleRoutes = require('./routes/flashSaleRoutes');
 
-const shopManagerRoutes = require('./routes/shopManagerRoutes');
+
+const adminPostRoutes = require('./routes/adminPostRoutes');
 const adminProductRoutes = require('./routes/adminProductRoutes');
-
+const adminUserRoutes = require('./routes/adminUserRoutes');
+const adminShopRoutes = require('./routes/adminShopRoutes');
+const adminFlashSaleRoutes = require('./routes/adminFlashSaleRoutes');
 
 
 app.use('/api/auth', authRoutes);
@@ -94,9 +98,13 @@ app.use('/api/hashtags', hashtagsRoutes);
 app.use('/api/saved-posts', savedPostRoutes);
 app.use('/api/follow', followRoutes);
 app.use('/api/recommendations', recommendationRoutes);
+app.use('/api/flash-sales', flashSaleRoutes);
 
-app.use('/api/admin/shops', shopManagerRoutes); //quản lí duyệt shop đăng kí
+app.use('/api/admin/posts', adminPostRoutes); //quản lí bài viết nền tảng
 app.use('/api/admin/products', adminProductRoutes); //quản lí sản phẩm nền tảng
+app.use('/api/admin/users', adminUserRoutes); //quản lí người dùng (user/shop) nền tảng
+app.use('/api/admin/shops', adminShopRoutes); //quản lí duyệt shop đăng kí
+app.use('/api/admin/flash-sales', adminFlashSaleRoutes); //quản lí flashsale nền tảng
 
 app.use('/api/upload', uploadRoutes);
 app.use('/uploads', express.static('uploads')); // phục vụ file tĩnh
