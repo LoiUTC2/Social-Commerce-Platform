@@ -14,6 +14,7 @@ const {
     trainMatrixFactorization,
     prepareTfIdfMatrix,
     trainUserShopModel,
+    getFlashSaleRecommendations,
 
     debugGetCollaborativeRecommendations,
     debugGetHybridRecommendations
@@ -432,6 +433,483 @@ router.get('/products', requestLogger, setActor, async (req, res) => {
     }
 });
 
+// Route mới để lấy gợi ý Flash Sale (trong này có trả về sản phẩm gợi ý theo hành vi và độ hot)
+router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res) => {
+    try {
+        const {
+            limit = 10,
+            page = 1,
+            search = '',
+            sortBy = 'recommended', // recommended, endTime, totalPurchases, newest
+            sortOrder = 'desc'
+        } = req.query;
+
+        const userId = req.actor?._id?.toString();
+        const sessionId = req.sessionId;
+        const role = req.actor?.type || 'user';
+
+        // Validate pagination parameters
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(50, Math.max(1, parseInt(limit))); // Giới hạn 1-50
+        const offset = (pageNum - 1) * limitNum;
+
+        console.log(`🔍 Debug flashsales endpoint - userId: ${userId}, sessionId: ${sessionId}, role: ${role}, page: ${pageNum}, limit: ${limitNum}`);
+
+        if (!userId && !sessionId) {
+            return errorResponse(res, 'Cần userId hoặc sessionId', 400);
+        }
+
+        // Build cache key với các params
+        const cacheKey = `flashsales:${userId || sessionId}:${pageNum}:${limitNum}:${search}:${sortBy}:${sortOrder}:${role}`;
+
+        // Kiểm tra cache
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            console.log('✅ Sử dụng cached flashsales result');
+            return successResponse(res, 'Lấy gợi ý Flash Sale thành công (cached)', JSON.parse(cached));
+        }
+
+        // Giảm timeout xuống 20 giây
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Request timeout after 20 seconds')), 20000);
+        });
+
+        // Gọi recommendation với error handling
+        const recommendationPromise = (async () => {
+            try {
+                console.log('🚀 Bắt đầu lấy flash sale recommendations...');
+
+                let allFlashSales = [];
+                let allProducts = [];
+                let isRecommendationBased = false;
+
+                // Nếu không có search/filter, sử dụng recommendation
+                if (!search && sortBy === 'recommended') {
+                    // Kiểm tra cache recommendations trước
+                    const recCacheKey = `recs:flashsale:${userId || sessionId}:${limitNum * 5}:${role}`;
+                    const cachedRecs = await redisClient.get(recCacheKey);
+
+                    if (cachedRecs) {
+                        console.log('✅ Sử dụng cached flash sale recommendations');
+                        const cachedResult = JSON.parse(cachedRecs);
+                        allFlashSales = cachedResult.flashSales || [];
+                        allProducts = cachedResult.products || [];
+                        isRecommendationBased = true;
+                    } else {
+                        // Thực hiện recommendation với timeout nhỏ hơn
+                        const recTimeout = new Promise((_, reject) => {
+                            setTimeout(() => reject(new Error('Recommendation timeout')), 18000);
+                        });
+
+                        const recPromise = getFlashSaleRecommendations(
+                            userId,
+                            sessionId,
+                            limitNum * 5, // Lấy nhiều hơn để có đủ dữ liệu sau khi filter
+                            role
+                        );
+
+                        try {
+                            const result = await Promise.race([recPromise, recTimeout]);
+                            allFlashSales = result.flashSales || [];
+                            allProducts = result.products || [];
+                            isRecommendationBased = true;
+
+                            // Cache result
+                            await redisClient.setex(recCacheKey, 600, JSON.stringify(result));
+                        } catch (recError) {
+                            console.warn('⚠️ Recommendation failed, fallback to query-based');
+                            allFlashSales = [];
+                            allProducts = [];
+                            isRecommendationBased = false;
+                        }
+                    }
+                }
+
+                console.log(`📊 Flash sales: ${allFlashSales.length}, Products: ${allProducts.length}`);
+
+                let flashSaleResults = [];
+                let productResults = [];
+                let totalFlashSales = 0;
+                let totalProducts = 0;
+
+                if (isRecommendationBased && allFlashSales.length > 0) {
+                    // Apply search filter if provided
+                    let filteredFlashSales = allFlashSales;
+                    let filteredProducts = allProducts;
+
+                    if (search) {
+                        const searchRegex = new RegExp(search, 'i');
+                        filteredFlashSales = filteredFlashSales.filter(fs =>
+                            searchRegex.test(fs.name) ||
+                            searchRegex.test(fs.description || '')
+                        );
+                        filteredProducts = filteredProducts.filter(p =>
+                            searchRegex.test(p.name) ||
+                            searchRegex.test(p.description || '')
+                        );
+                    }
+
+                    totalFlashSales = filteredFlashSales.length;
+                    totalProducts = filteredProducts.length;
+
+                    // Pagination for flash sales
+                    flashSaleResults = filteredFlashSales.slice(offset, offset + limitNum);
+
+                    // Pagination for products (separate pagination)
+                    productResults = filteredProducts.slice(offset, offset + limitNum);
+
+                } else {
+                    // Fallback: Query database trực tiếp
+                    console.log('🔄 Fallback to database query...');
+
+                    // Build query conditions for flash sales
+                    const flashSaleConditions = {
+                        isActive: true,
+                        endTime: { $gt: new Date() }
+                    };
+
+                    if (search) {
+                        flashSaleConditions.$or = [
+                            { name: { $regex: search, $options: 'i' } },
+                            { description: { $regex: search, $options: 'i' } }
+                        ];
+                    }
+
+                    // Build sort conditions
+                    let sortConditions = {};
+                    switch (sortBy) {
+                        case 'endTime':
+                            sortConditions = { endTime: sortOrder === 'asc' ? 1 : -1 };
+                            break;
+                        case 'totalPurchases':
+                            sortConditions = { 'stats.totalPurchases': sortOrder === 'asc' ? 1 : -1 };
+                            break;
+                        case 'newest':
+                            sortConditions = { createdAt: sortOrder === 'asc' ? 1 : -1 };
+                            break;
+                        default: // recommended or fallback
+                            sortConditions = {
+                                'stats.totalPurchases': -1,
+                                'stats.totalRevenue': -1,
+                                endTime: 1,
+                                createdAt: -1
+                            };
+                    }
+
+                    // Get total count and paginated flash sales
+                    const [flashSales, flashSaleCount] = await Promise.all([
+                        FlashSale.find(flashSaleConditions)
+                            .select('name description products startTime endTime stats')
+                            .populate({
+                                path: 'products.product',
+                                select: 'name mainCategory price hashtags images'
+                            })
+                            .sort(sortConditions)
+                            .skip(offset)
+                            .limit(limitNum)
+                            .lean(),
+                        FlashSale.countDocuments(flashSaleConditions)
+                    ]);
+
+                    flashSaleResults = flashSales.map(fs => ({ ...fs, type: 'flashsale' }));
+                    totalFlashSales = flashSaleCount;
+
+                    // Extract products from flash sales for separate pagination
+                    const allProductsFromFS = flashSales.flatMap(fs => 
+                        (fs.products || []).map(p => ({
+                            ...p.product,
+                            type: 'product',
+                            flashSaleId: fs._id,
+                            salePrice: p.salePrice,
+                            soldCount: p.soldCount || 0
+                        }))
+                    );
+
+                    // Sort products
+                    const sortedProducts = allProductsFromFS.sort((a, b) => {
+                        switch (sortBy) {
+                            case 'endTime':
+                            case 'newest':
+                                return sortOrder === 'asc' 
+                                    ? new Date(a.createdAt) - new Date(b.createdAt)
+                                    : new Date(b.createdAt) - new Date(a.createdAt);
+                            case 'totalPurchases':
+                                return sortOrder === 'asc' 
+                                    ? (a.soldCount || 0) - (b.soldCount || 0)
+                                    : (b.soldCount || 0) - (a.soldCount || 0);
+                            default:
+                                return (b.soldCount || 0) - (a.soldCount || 0);
+                        }
+                    });
+
+                    productResults = sortedProducts.slice(offset, offset + limitNum);
+                    totalProducts = sortedProducts.length;
+                }
+
+                // Nếu không có kết quả và đang ở trang 1, thử fallback đơn giản
+                if (flashSaleResults.length === 0 && pageNum === 1) {
+                    console.log('⚠️ Không có flash sales, thử fallback...');
+                    const fallbackFlashSales = await FlashSale.find({
+                        isActive: true,
+                        endTime: { $gt: new Date() }
+                    })
+                        .select('name description products startTime endTime stats')
+                        .populate({
+                            path: 'products.product',
+                            select: 'name mainCategory price hashtags images'
+                        })
+                        .sort({
+                            'stats.totalPurchases': -1,
+                            'stats.totalRevenue': -1,
+                            endTime: 1
+                        })
+                        .limit(limitNum)
+                        .lean();
+
+                    flashSaleResults = fallbackFlashSales.map(fs => ({ ...fs, type: 'flashsale' }));
+                    totalFlashSales = fallbackFlashSales.length;
+
+                    // Extract products
+                    const fallbackProducts = fallbackFlashSales.flatMap(fs => 
+                        (fs.products || []).map(p => ({
+                            ...p.product,
+                            type: 'product',
+                            flashSaleId: fs._id,
+                            salePrice: p.salePrice,
+                            soldCount: p.soldCount || 0
+                        }))
+                    ).slice(0, limitNum);
+
+                    productResults = fallbackProducts;
+                    totalProducts = fallbackProducts.length;
+                }
+
+                // Tính toán pagination metadata cho flash sales
+                const totalFlashSalePages = Math.ceil(totalFlashSales / limitNum);
+                const hasNextFlashSale = pageNum < totalFlashSalePages;
+                const hasPrevFlashSale = pageNum > 1;
+
+                // Tính toán pagination metadata cho products
+                const totalProductPages = Math.ceil(totalProducts / limitNum);
+                const hasNextProduct = pageNum < totalProductPages;
+                const hasPrevProduct = pageNum > 1;
+
+                const result = {
+                    flashSales: flashSaleResults,
+                    products: productResults,
+                    pagination: {
+                        flashSales: {
+                            currentPage: pageNum,
+                            totalPages: totalFlashSalePages,
+                            totalCount: totalFlashSales,
+                            limit: limitNum,
+                            hasNext: hasNextFlashSale,
+                            hasPrev: hasPrevFlashSale,
+                            nextPage: hasNextFlashSale ? pageNum + 1 : null,
+                            prevPage: hasPrevFlashSale ? pageNum - 1 : null
+                        },
+                        products: {
+                            currentPage: pageNum,
+                            totalPages: totalProductPages,
+                            totalCount: totalProducts,
+                            limit: limitNum,
+                            hasNext: hasNextProduct,
+                            hasPrev: hasPrevProduct,
+                            nextPage: hasNextProduct ? pageNum + 1 : null,
+                            prevPage: hasPrevProduct ? pageNum - 1 : null
+                        }
+                    },
+                    filters: {
+                        search: search || null,
+                        sortBy,
+                        sortOrder
+                    },
+                    count: {
+                        flashSales: flashSaleResults.length,
+                        products: productResults.length
+                    },
+                    metadata: {
+                        isRecommendationBased,
+                        isFallback: !isRecommendationBased,
+                        reason: isRecommendationBased ? null : 'Query-based results',
+                        timestamp: new Date().toISOString()
+                    }
+                };
+
+                console.log(`✅ Trả về ${flashSaleResults.length}/${totalFlashSales} flash sales và ${productResults.length}/${totalProducts} products cho page ${pageNum}`);
+                return result;
+
+            } catch (recError) {
+                console.error('❌ Lỗi trong recommendation process:', recError);
+                throw recError;
+            }
+        })();
+
+        // Race between recommendation và timeout - ĐÃ SỬA LỖI SYNTAX
+        const result = await Promise.race([recommendationPromise, timeoutPromise]);
+
+        // Cache kết quả trong 10 phút
+        await redisClient.setex(cacheKey, 600, JSON.stringify(result));
+
+        return successResponse(res, 'Lấy gợi ý Flash Sale thành công', result);
+
+    } catch (err) {
+        console.error('❌ API Error:', err);
+
+        // Fallback cho mọi loại lỗi
+        console.log('🔄 Fallback to simple flash sale recommendations...');
+
+        try {
+            const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+            const limitNum = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+            const offset = (pageNum - 1) * limitNum;
+
+            // Fallback query conditions
+            const queryConditions = {
+                isActive: true,
+                endTime: { $gt: new Date() }
+            };
+
+            // Apply basic search if provided
+            if (req.query.search) {
+                queryConditions.$or = [
+                    { name: { $regex: req.query.search, $options: 'i' } },
+                    { description: { $regex: req.query.search, $options: 'i' } }
+                ];
+            }
+
+            const [fallbackFlashSales, totalCount] = await Promise.all([
+                FlashSale.find(queryConditions)
+                    .select('name description hashtags products startTime endTime stats')
+                    .populate({
+                        path: 'products.product',
+                        select: 'name mainCategory price hashtags images'
+                    })
+                    .sort({
+                        'stats.totalPurchases': -1,
+                        'stats.totalRevenue': -1,
+                        endTime: 1
+                    })
+                    .skip(offset)
+                    .limit(limitNum)
+                    .lean(),
+                FlashSale.countDocuments(queryConditions)
+            ]);
+
+            const flashSaleResults = fallbackFlashSales.map(fs => ({ ...fs, type: 'flashsale' }));
+
+            // Extract products
+            const productResults = fallbackFlashSales.flatMap(fs => 
+                (fs.products || []).map(p => ({
+                    ...p.product,
+                    type: 'product',
+                    flashSaleId: fs._id,
+                    salePrice: p.salePrice,
+                    soldCount: p.soldCount || 0
+                }))
+            ).slice(0, limitNum);
+
+            const totalPages = Math.ceil(totalCount / limitNum);
+            const hasNext = pageNum < totalPages;
+            const hasPrev = pageNum > 1;
+
+            const fallbackResult = {
+                flashSales: flashSaleResults,
+                products: productResults,
+                pagination: {
+                    flashSales: {
+                        currentPage: pageNum,
+                        totalPages,
+                        totalCount,
+                        limit: limitNum,
+                        hasNext,
+                        hasPrev,
+                        nextPage: hasNext ? pageNum + 1 : null,
+                        prevPage: hasPrev ? pageNum - 1 : null
+                    },
+                    products: {
+                        currentPage: pageNum,
+                        totalPages: Math.ceil(productResults.length / limitNum),
+                        totalCount: productResults.length,
+                        limit: limitNum,
+                        hasNext: false, // Vì đã slice rồi
+                        hasPrev: false,
+                        nextPage: null,
+                        prevPage: null
+                    }
+                },
+                filters: {
+                    search: req.query.search || null,
+                    sortBy: 'recommended',
+                    sortOrder: 'desc'
+                },
+                count: {
+                    flashSales: flashSaleResults.length,
+                    products: productResults.length
+                },
+                metadata: {
+                    isRecommendationBased: false,
+                    isFallback: true,
+                    reason: err.message.includes('timeout') ? 'Timeout' : 'Processing error',
+                    timestamp: new Date().toISOString()
+                }
+            };
+
+            return successResponse(res, 'Lấy gợi ý Flash Sale thành công (fallback)', fallbackResult);
+
+        } catch (fallbackError) {
+            console.error('❌ Fallback cũng lỗi:', fallbackError);
+
+            // Final fallback - trả về empty result với pagination structure
+            const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+            const limitNum = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+
+            return successResponse(res, 'Không thể lấy gợi ý Flash Sale', {
+                flashSales: [],
+                products: [],
+                pagination: {
+                    flashSales: {
+                        currentPage: pageNum,
+                        totalPages: 0,
+                        totalCount: 0,
+                        limit: limitNum,
+                        hasNext: false,
+                        hasPrev: false,
+                        nextPage: null,
+                        prevPage: null
+                    },
+                    products: {
+                        currentPage: pageNum,
+                        totalPages: 0,
+                        totalCount: 0,
+                        limit: limitNum,
+                        hasNext: false,
+                        hasPrev: false,
+                        nextPage: null,
+                        prevPage: null
+                    }
+                },
+                filters: {
+                    search: req.query.search || null,
+                    sortBy: req.query.sortBy || 'recommended',
+                    sortOrder: req.query.sortOrder || 'desc'
+                },
+                count: {
+                    flashSales: 0,
+                    products: 0
+                },
+                metadata: {
+                    isRecommendationBased: false,
+                    isFallback: true,
+                    reason: 'All fallbacks failed',
+                    error: process.env.NODE_ENV === 'development' ? fallbackError.message : 'System error',
+                    timestamp: new Date().toISOString()
+                }
+            });
+        }
+    }
+});
+
 // Route lấy gợi ý cửa hàng/shop với pagination và filter
 router.get('/shops', requestLogger, verifyToken, setActor, async (req, res) => {
     try {
@@ -800,8 +1278,8 @@ router.get('/shops', requestLogger, verifyToken, setActor, async (req, res) => {
 // Route lấy gợi ý người dùng với phân trang đầy đủ
 router.get('/users', requestLogger, verifyToken, setActor, async (req, res) => {
     try {
-        const {   
-            limit = 10, 
+        const {
+            limit = 10,
             page = 1,
             offset,
             sortBy = 'score', // score, createdAt, followersCount
@@ -1095,12 +1573,12 @@ router.get('/users', requestLogger, verifyToken, setActor, async (req, res) => {
 router.get('/shops-case-login', requestLogger, verifyToken, setActor, async (req, res) => {
     try {
         // 1. Parse query parameters với validation
-        const { 
-            limit = 10, 
-            page = 1, 
+        const {
+            limit = 10,
+            page = 1,
             entityType = 'shop' // 'shop', 'user', 'all'
         } = req.query;
-        
+
         const userId = req.actor?._id.toString();
         const sessionId = req.sessionId;
         const role = req.actor?.type || 'user';
@@ -1124,10 +1602,10 @@ router.get('/shops-case-login', requestLogger, verifyToken, setActor, async (req
         // 3. Lấy recommendations với số lượng lớn hơn để có thể phân trang
         const totalRecommendationsNeeded = validatedPage * validatedLimit;
         const recommendations = await getUserShopRecommendations(
-            userId, 
-            sessionId, 
+            userId,
+            sessionId,
             totalRecommendationsNeeded + validatedLimit, // Lấy thêm để check hasNextPage
-            validatedEntityType, 
+            validatedEntityType,
             role
         );
 
@@ -1177,12 +1655,12 @@ router.get('/shops-case-login', requestLogger, verifyToken, setActor, async (req
 router.get('/users-case-login', verifyToken, setActor, async (req, res) => {
     try {
         // 1. Parse query parameters với validation
-        const { 
-            limit = 10, 
-            page = 1, 
+        const {
+            limit = 10,
+            page = 1,
             entityType = 'user' // default là 'user' vì đây là endpoint dành cho users
         } = req.query;
-        
+
         const userId = req.actor?._id.toString();
         const sessionId = req.sessionId;
         const role = req.actor?.type || 'user';
@@ -1206,10 +1684,10 @@ router.get('/users-case-login', verifyToken, setActor, async (req, res) => {
         // 3. Lấy recommendations với số lượng lớn hơn để có thể phân trang
         const totalRecommendationsNeeded = validatedPage * validatedLimit;
         const recommendations = await getUserShopRecommendations(
-            userId, 
-            sessionId, 
+            userId,
+            sessionId,
             totalRecommendationsNeeded + validatedLimit, // Lấy thêm để check hasNextPage
-            validatedEntityType, 
+            validatedEntityType,
             role
         );
 
@@ -1254,6 +1732,8 @@ router.get('/users-case-login', verifyToken, setActor, async (req, res) => {
         );
     }
 });
+
+////////////////// TRAINING
 
 // Route để huấn luyện mô hình User-Shop
 router.post('/train-user-shop', async (req, res) => {

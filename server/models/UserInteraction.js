@@ -12,7 +12,7 @@ const userInteractionSchema = new mongoose.Schema({
   },
   targetType: {
     type: String,
-    enum: ['post', 'comment', 'product', 'shop', 'user', 'review', 'search'],
+    enum: ['post', 'comment', 'product', 'shop', 'user', 'review', 'search', 'flashsale'],
     required: true
   },
   targetId: {
@@ -49,7 +49,21 @@ const userInteractionSchema = new mongoose.Schema({
 
     searchQuery: String, // Từ khóa tìm kiếm (nếu có)
     resultsCount: Number, // Số lượng kết quả (nếu là search)
-    hasResults: Boolean // Có kết quả không (nếu là search)
+    hasResults: Boolean, // Có kết quả không (nếu là search)
+
+    description: String, // Mô tả flash sale
+    totalProducts: Number, // Tổng số sản phẩm trong flash sale
+    products: [{
+      name: String,
+      category: String,
+      hashtags: [String]
+    }], // Danh sách sản phẩm trong flash sale
+    isFeatured: Boolean, // Flash sale nổi bật
+    startTime: Date, // Thời gian bắt đầu
+    endTime: Date, // Thời gian kết thúc
+    totalViews: Number, // Tổng lượt xem
+    totalPurchases: Number, // Tổng lượt mua
+    totalRevenue: Number, // Tổng doanh thu
   },
   action: {
     type: String,

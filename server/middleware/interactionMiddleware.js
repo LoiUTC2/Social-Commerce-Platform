@@ -8,6 +8,7 @@ const Category = require('../models/Category');
 const geoip = require('geoip-lite');
 const Comment = require('../models/Comment');
 const Cart = require('../models/Cart');
+const FlashSale = require('../models/FlashSale');
 
 // Kiểm tra Redis client - nếu không có thì bỏ qua cache
 let client;
@@ -348,6 +349,32 @@ const trackInteraction = async (req, res, next) => {
             if (shop) {
                 targetDetails = await extractMetadata('shop', shop)
             }
+        } else if (targetType === 'flashsale') {
+            const flashSale = await FlashSale.findById(targetId)
+                .select('name products startTime endTime')
+                .populate({
+                    path: 'products.product',
+                    select: 'name mainCategory hashtags',
+                    populate: { path: 'mainCategory', select: 'name' }
+                })
+                .lean();
+            if (flashSale) {
+                targetDetails = {
+                    name: flashSale.name,
+                    productCount: flashSale.products?.length || 0,
+                    products: flashSale.products?.map(p => ({
+                        name: p.product?.name,
+                        category: p.product?.mainCategory?.name,
+                        hashtags: p.product?.hashtags || []
+                    })) || [],
+                    startTime: flashSale.startTime,
+                    endTime: flashSale.endTime
+                };
+                // Nếu action là purchase, sử dụng targetDetails từ req.body (nếu có)
+                if (action === 'purchase' && req.body.targetDetails) {
+                    targetDetails = req.body.targetDetails;
+                }
+            }
         }
 
         // Tạo interaction object
@@ -508,6 +535,58 @@ const trackView = (targetType) => async (req, res, next) => {
                 targetDetails = await extractMetadata(targetType, entity);
                 console.log(`✅ Found post with ID: ${targetId}`);
             }
+        } else if ((req.params.slug || req.params.id) && targetType === 'flashsale') {
+            console.log(`🔍 Processing flashsale with slug: ${req.params.slug} or id: ${req.params.id}`);
+
+            // Ưu tiên slug trước, sau đó mới đến id
+            const identifier = req.params.slug || req.params.id;
+            const isId = !req.params.slug && req.params.id;
+
+            // Validate ObjectId format nếu dùng id
+            if (isId && !identifier.match(/^[0-9a-fA-F]{24}$/)) {
+                console.log(`❌ Invalid ObjectId format: ${identifier}`);
+                return next();
+            }
+
+            const cacheKey = `${targetType}:${isId ? 'id' : 'slug'}:${identifier}`;
+            let entity;
+            let cached = await client?.get(cacheKey);
+
+            if (cached) {
+                try {
+                    entity = JSON.parse(cached);
+                    console.log(`✅ Cache hit for ${cacheKey}`);
+                } catch (err) {
+                    console.error(`❌ Error parsing cache for ${cacheKey}:`, err);
+                }
+            } else {
+                console.log(`🔍 Fetching flashsale from database...`);
+                const query = isId
+                    ? FlashSale.findById(identifier)
+                    : FlashSale.findOne({ slug: identifier });
+
+                entity = await query
+                    .select('name description products startTime endTime banner isFeatured stats isActive')
+                    .populate({
+                        path: 'products.product',
+                        select: 'name mainCategory price hashtags',
+                        populate: { path: 'mainCategory', select: 'name' }
+                    });
+
+                if (entity) {
+                    await client?.setex(cacheKey, 3600, JSON.stringify(entity));
+                    console.log(`✅ Cache set for ${cacheKey}`);
+                }
+            }
+
+            if (entity) {
+                targetId = entity._id;
+                req[targetType] = entity;
+                targetDetails = await extractMetadata(targetType, entity);
+                console.log(`✅ Found flashsale with ID: ${targetId}`);
+            } else {
+                console.log(`❌ No flashsale found with ${isId ? 'id' : 'slug'}: ${identifier}`);
+            }
         }
 
         if (targetId) {
@@ -632,6 +711,28 @@ const extractMetadata = async (targetType, entity) => {
             likesCount: entity.likesCount || 0,
             commentsCount: entity.commentsCount || 0,
             privacy: entity.privacy || 'public',
+            via: metadata.via
+        };
+    } else if (targetType === 'flashsale') {
+        const now = new Date();
+        const isActive = entity.isActive && now >= new Date(entity.startTime) && now <= new Date(entity.endTime);
+
+        return {
+            name: entity.name,
+            description: entity.description ? entity.description.substring(0, 100) : null,
+            totalProducts: entity.products?.length || 0,
+            products: entity.products?.map(p => ({
+                name: p.product?.name,
+                category: p.product?.mainCategory?.name,
+                hashtags: p.product?.hashtags?.map(h => h.toLowerCase()) || []
+            })) || [],
+            isActive: isActive,
+            isFeatured: entity.isFeatured || false,
+            startTime: entity.startTime,
+            endTime: entity.endTime,
+            totalViews: entity.stats?.totalViews || 0,
+            totalPurchases: entity.stats?.totalPurchases || 0,
+            totalRevenue: entity.stats?.totalRevenue || 0,
             via: metadata.via
         };
     }

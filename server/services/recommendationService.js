@@ -9,6 +9,7 @@ const natural = require('natural');
 const TfIdf = natural.TfIdf;
 const fs = require('fs').promises;
 const path = require('path');
+const FlashSale = require('../models/FlashSale');
 
 // Cache để lưu model trong memory
 let modelCache = null;
@@ -1141,14 +1142,25 @@ async function prepareTfIdfMatrix() {
     const products = await Product.find({ isActive: true }).select('name description hashtags').lean();
     const posts = await Post.find({ privacy: 'public' }).select('content hashtags').lean();
 
+    // Thêm Flash Sale vào ma trận
+    const flashSales = await FlashSale.find({ isActive: true })
+        .select('name description hashtags products')
+        .populate({
+            path: 'products.product',
+            select: 'name description hashtags'
+        })
+        .lean();
+
     const tfidf = new TfIdf();
     const itemIds = [];
+    const itemTypes = []; // Lưu type để phân biệt product/post/flashsale
 
     // Thêm nội dung sản phẩm
     products.forEach(product => {
         const content = `${product.name} ${product.description} ${product.hashtags.join(' ')}`;
         tfidf.addDocument(content);
         itemIds.push(product._id.toString());
+        itemTypes.push('product');
     });
 
     // Thêm nội dung bài viết
@@ -1156,17 +1168,30 @@ async function prepareTfIdfMatrix() {
         const content = `${post.content} ${post.hashtags.join(' ')}`;
         tfidf.addDocument(content);
         itemIds.push(post._id.toString());
+        itemTypes.push('post');
+    });
+
+    // Thêm nội dung Flash Sale
+    flashSales.forEach(flashSale => {
+        const productContent = flashSale.products
+            ?.map(p => `${p.product?.name} ${p.product?.hashtags.join(' ')}`)
+            .join(' ');
+        const content = `${flashSale.name} ${flashSale.description} ${productContent}`;
+        tfidf.addDocument(content);
+        itemIds.push(flashSale._id.toString());
+        itemTypes.push('flashsale');
     });
 
     // Lưu ma trận TF-IDF vào Redis
     const tfidfData = {
         documents: tfidf.documents,
         itemIds,
+        itemTypes, // Thêm itemTypes
         createdAt: new Date().toISOString()
     };
 
     await redisClient.setex('tfidf_matrix', 3600, JSON.stringify(tfidfData)); // Cache 1 giờ
-    return { tfidf, itemIds };
+    return { tfidf, itemIds, itemTypes }; // Trả về itemTypes
 }
 
 // Hàm tính độ tương đồng cosine
@@ -1182,36 +1207,62 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 // Hàm gợi ý dựa trên TF-IDF
-async function getContentBasedRecommendations(itemId, limit = 10) {
+async function getContentBasedRecommendations(itemId, itemType = 'product', limit = 10) {
     try {
         const cached = await redisClient.get('tfidf_matrix');
         let tfidfData;
 
         if (!cached) {
             const result = await prepareTfIdfMatrix();
-            tfidfData = { documents: result.tfidf.documents, itemIds: result.itemIds };
+            tfidfData = { documents: result.tfidf.documents, itemIds: result.itemIds, itemTypes: result.itemTypes };
         } else {
             tfidfData = JSON.parse(cached);
         }
 
-        const { documents, itemIds } = tfidfData;
+        const { documents, itemIds, itemTypes } = tfidfData;
         const itemIdx = itemIds.indexOf(itemId);
 
         if (itemIdx === -1) {
-            console.log(`⚠️ Không tìm thấy item ${itemId} trong TF-IDF matrix`);
+            console.log(`⚠️ Không tìm thấy item ${itemId} (${itemType}) trong TF-IDF matrix`);
             return [];
         }
 
         const similarities = documents.map((doc, idx) => ({
             itemId: itemIds[idx],
+            itemType: itemTypes[idx],
             similarity: idx === itemIdx ? 0 : cosineSimilarity(documents[itemIdx], doc)
         }));
 
-        return similarities
-            .filter(s => s.similarity > 0)
+        // Lấy top items, ưu tiên Flash Sale và sản phẩm
+        const topItems = similarities
+            .filter(s => s.similarity > 0 && ['product', 'flashsale'].includes(s.itemType))
             .sort((a, b) => b.similarity - a.similarity)
-            .slice(0, limit)
-            .map(s => s.itemId);
+            .slice(0, limit);
+
+        // Lấy thông tin chi tiết
+        const result = [];
+        for (const { itemId, itemType } of topItems) {
+            try {
+                if (itemType === 'product') {
+                    const product = await Product.findById(itemId).lean();
+                    if (product) result.push({ ...product, type: 'product' });
+                } else if (itemType === 'flashsale') {
+                    const flashSale = await FlashSale.findById(itemId)
+                        .select('name description hashtags products startTime endTime')
+                        .populate({
+                            path: 'products.product',
+                            select: 'name mainCategory price hashtags'
+                        })
+                        .lean();
+                    if (flashSale) result.push({ ...flashSale, type: 'flashsale' });
+                }
+            } catch (dbError) {
+                console.error(`❌ Lỗi khi query ${itemType} với ID ${itemId}:`, dbError.message);
+                continue;
+            }
+        }
+
+        return result;
 
     } catch (error) {
         console.error('❌ Lỗi trong getContentBasedRecommendations:', error);
@@ -1262,7 +1313,7 @@ async function getContentBasedRecommendationsFromSearch(query, category, hashtag
 
 ///////////////
 
-// Hàm lấy content-based recommendations từ lịch sử user
+// Hàm lấy content-based recommendations từ lịch sử user (ưu tiên Flash Sale)
 async function getContentBasedRecommendationsFromUserHistory(userId, sessionId, limit = 20) {
     try {
         // Lấy interactions gần đây của user
@@ -1297,15 +1348,16 @@ async function getContentBasedRecommendationsFromUserHistory(userId, sessionId, 
                         interaction.searchSignature.hashtags,
                         Math.ceil(limit / 4)
                     );
-                    searchRecs.forEach(id => contentRecs.add(id));
-
+                    searchRecs.forEach(id => contentRecs.add(`${id}:product`)); // Thêm type
                 } else if (interaction.targetId && /^[0-9a-fA-F]{24}$/.test(interaction.targetId.toString())) {
-                    // Gợi ý dựa trên item đã tương tác
+                    // [Grok] Gợi ý dựa trên Flash Sale hoặc sản phẩm
+                    const targetType = interaction.targetType === 'flashsale' ? 'flashsale' : 'product';
                     const itemRecs = await getContentBasedRecommendations(
                         interaction.targetId.toString(),
+                        targetType,
                         Math.ceil(limit / 4)
                     );
-                    itemRecs.forEach(id => contentRecs.add(id));
+                    itemRecs.forEach(item => contentRecs.add(`${item._id}:${item.type}`));
                 }
             } catch (interactionError) {
                 console.warn(`⚠️ Lỗi khi xử lý interaction ${interaction._id}:`, interactionError.message);
@@ -1313,7 +1365,32 @@ async function getContentBasedRecommendationsFromUserHistory(userId, sessionId, 
             }
         }
 
-        return Array.from(contentRecs).slice(0, limit);
+        // Chuyển Set thành mảng và lấy thông tin chi tiết
+        const result = [];
+        const uniqueItems = Array.from(contentRecs).slice(0, limit);
+        for (const item of uniqueItems) {
+            const [itemId, itemType] = item.split(':');
+            try {
+                if (itemType === 'product') {
+                    const product = await Product.findById(itemId).lean();
+                    if (product) result.push({ ...product, type: 'product' });
+                } else if (itemType === 'flashsale') {
+                    const flashSale = await FlashSale.findById(itemId)
+                        .select('name description products startTime endTime')
+                        .populate({
+                            path: 'products.product',
+                            select: 'name mainCategory price hashtags'
+                        })
+                        .lean();
+                    if (flashSale) result.push({ ...flashSale, type: 'flashsale' });
+                }
+            } catch (dbError) {
+                console.error(`❌ Lỗi khi query ${itemType} với ID ${itemId}:`, dbError.message);
+                continue;
+            }
+        }
+
+        return result;
 
     } catch (error) {
         console.error('❌ Lỗi trong getContentBasedRecommendationsFromUserHistory:', error);
@@ -1321,7 +1398,7 @@ async function getContentBasedRecommendationsFromUserHistory(userId, sessionId, 
     }
 }
 
-// Hàm kết hợp gợi ý được cải thiện với error handling tốt hơn
+// Hàm kết hợp gợi ý được cải thiện với error handling tốt hơn (ưu tiên Flash Sale)
 async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'user') {
     const cacheKey = `recs:hybrid:${userId || sessionId}:${limit}:${role}`;
 
@@ -1337,7 +1414,7 @@ async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'u
 
         // Khởi tạo arrays để tránh undefined
         let collaborativeRecs = [];
-        let contentBasedIds = [];
+        let contentBasedItems = [];
 
         // 1. Lấy gợi ý từ collaborative filtering với timeout ngắn
         try {
@@ -1382,22 +1459,22 @@ async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'u
                 Math.min(limit * 2, 50)
             );
 
-            contentBasedIds = await Promise.race([contentPromise, contentTimeout]);
-            console.log(`📊 Content-based IDs: ${contentBasedIds?.length || 0} items`);
+            contentBasedItems = await Promise.race([contentPromise, contentTimeout]);
+            console.log(`📊 Content-based items: ${contentBasedItems?.length || 0} items`);
         } catch (contentError) {
             console.warn('⚠️ Lỗi content-based filtering:', contentError.message);
-            contentBasedIds = [];
+            contentBasedItems = [];
         }
 
         // 3. Kiểm tra nếu cả hai đều trống, fallback ngay
         if ((!collaborativeRecs || collaborativeRecs.length === 0) &&
-            (!contentBasedIds || contentBasedIds.length === 0)) {
+            (!contentBasedItems || contentBasedItems.length === 0)) {
             console.log('⚠️ Không có gợi ý từ cả hai phương pháp, fallback ngay');
             return await getFallbackRecommendations(role, limit);
         }
 
         // 4. Nếu chỉ có collaborative recs và đủ số lượng, trả về luôn
-        if (collaborativeRecs && collaborativeRecs.length >= limit && (!contentBasedIds || contentBasedIds.length === 0)) {
+        if (collaborativeRecs && collaborativeRecs.length >= limit && (!contentBasedItems || contentBasedItems.length === 0)) {
             console.log('✅ Chỉ sử dụng collaborative recs vì đã đủ');
             const result = collaborativeRecs.slice(0, limit);
             await redisClient.setex(cacheKey, 1800, JSON.stringify(result));
@@ -1408,28 +1485,29 @@ async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'u
         const scoreMap = new Map();
         const entityMap = new Map();
 
-        // Xử lý collaborative filtering results (trọng số 0.8)
+        // Xử lý collaborative filtering results (trọng số 0.7) Giảm trọng số để ưu tiên content-based
         if (collaborativeRecs && Array.isArray(collaborativeRecs)) {
             collaborativeRecs.forEach((item, index) => {
                 if (item && item._id) {
                     const itemId = item._id.toString();
-                    const score = (collaborativeRecs.length - index) / collaborativeRecs.length * 0.8;
+                    const score = (collaborativeRecs.length - index) / collaborativeRecs.length * 0.7;
                     scoreMap.set(itemId, (scoreMap.get(itemId) || 0) + score);
                     entityMap.set(itemId, { ...item, source: 'collaborative' });
                 }
             });
         }
 
-        // Xử lý content-based results (trọng số 0.2)
-        if (contentBasedIds && Array.isArray(contentBasedIds)) {
-            for (let i = 0; i < Math.min(contentBasedIds.length, limit); i++) {
-                const itemId = contentBasedIds[i];
-                if (itemId && typeof itemId === 'string' && /^[0-9a-fA-F]{24}$/.test(itemId)) {
-                    const score = (Math.min(contentBasedIds.length, limit) - i) / Math.min(contentBasedIds.length, limit) * 0.2;
+        // Xử lý content-based results (trọng số 0.3) [Grok] Tăng trọng số để ưu tiên Flash Sale
+        if (contentBasedItems && Array.isArray(contentBasedItems)) {
+            for (let i = 0; i < Math.min(contentBasedItems.length, limit); i++) {
+                const item = contentBasedItems[i];
+                if (item && item._id && /^[0-9a-fA-F]{24}$/.test(item._id.toString())) {
+                    const itemId = item._id.toString();
+                    const score = (Math.min(contentBasedItems.length, limit) - i) / Math.min(contentBasedItems.length, limit) * 0.3;
                     scoreMap.set(itemId, (scoreMap.get(itemId) || 0) + score);
 
                     if (!entityMap.has(itemId)) {
-                        entityMap.set(itemId, { _id: itemId, source: 'content-based', needsFetch: true });
+                        entityMap.set(itemId, { ...item, source: 'content-based' });
                     }
                 }
             }
@@ -1696,9 +1774,94 @@ async function getFallbackRecommendations(role, limit) {
     }
 }
 
+// Hàm lấy gợi ý Flash Sale và sản phẩm bên trong
+async function getFlashSaleRecommendations(userId, sessionId, limit = 10, role = 'user') {
+    try {
+        const cacheKey = `recs:flashsale:${userId || sessionId}:${limit}:${role}`;
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            console.log('✅ Lấy flash sale recommendations từ cache');
+            return JSON.parse(cached);
+        }
+
+        // 1. Lấy gợi ý Flash Sale từ hybrid recommendations
+        let flashSaleRecs = await getHybridRecommendations(userId, sessionId, limit * 2, role);
+        flashSaleRecs = flashSaleRecs.filter(item => item.type === 'flashsale');
+
+        // 2. Lấy sản phẩm phổ biến trong Flash Sale từ lịch sử mua hàng
+        const purchasedProducts = new Set();
+        if (flashSaleRecs.length < limit) {
+            const flashSaleInteractions = await UserInteraction.find({
+                $or: [
+                    { 'author._id': userId },
+                    { sessionId: sessionId }
+                ],
+                targetType: 'flashsale',
+                action: 'purchase',
+                timestamp: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // 30 ngày
+            }).lean();
+
+            for (const interaction of flashSaleInteractions) {
+                if (interaction.targetDetails?.products) {
+                    interaction.targetDetails.products.forEach(p => {
+                        if (p.productId) purchasedProducts.add(p.productId);
+                    });
+                }
+            }
+
+            // Lấy thêm Flash Sale từ sản phẩm đã mua
+            const relatedFlashSales = await FlashSale.find({
+                'products.product': { $in: Array.from(purchasedProducts) },
+                isActive: true
+            })
+                .select('name description products startTime endTime')
+                .populate({
+                    path: 'products.product',
+                    select: 'name mainCategory price hashtags'
+                })
+                .lean();
+
+            flashSaleRecs = [...flashSaleRecs, ...relatedFlashSales.map(fs => ({ ...fs, type: 'flashsale' }))];
+        }
+
+        // 3. Lấy sản phẩm được mua nhiều trong Flash Sale
+        const productRecs = [];
+        for (const flashSale of flashSaleRecs) {
+            if (flashSale.products) {
+                const sortedProducts = flashSale.products
+                    .sort((a, b) => (b.soldCount || 0) - (a.soldCount || 0))
+                    .slice(0, 3); // Top 3 sản phẩm
+                productRecs.push(
+                    ...sortedProducts.map(p => ({
+                        ...p.product,
+                        type: 'product',
+                        flashSaleId: flashSale._id,
+                        salePrice: p.salePrice
+                    }))
+                );
+            }
+        }
+
+        // 4. Kết hợp và giới hạn kết quả
+        const result = {
+            flashSales: flashSaleRecs.slice(0, limit),
+            products: productRecs.slice(0, limit)
+        };
+
+        // 5. Cache kết quả
+        await redisClient.setex(cacheKey, 1800, JSON.stringify(result)); // Cache 30 phút
+        console.log(`✅ Trả về ${result.flashSales.length} flash sales và ${result.products.length} products`);
+        return result;
+
+    } catch (error) {
+        console.error('❌ Lỗi trong getFlashSaleRecommendations:', error);
+        return { flashSales: [], products: [] };
+    }
+}
+
 /////////////////////
 
-// Hàm debug để kiểm tra chi tiết quá trình recommendation
+// Hàm debug để kiểm tra chi tiết quá trình recommendation 
 async function debugGetCollaborativeRecommendations(userId, sessionId, limit = 10, role = 'user') {
     console.log(`🔍 DEBUG: Starting collaborative recommendations for userId: ${userId}, sessionId: ${sessionId}, role: ${role}`);
 
@@ -2017,7 +2180,9 @@ module.exports = {
     getCollaborativeRecommendations,
     getContentBasedRecommendations,
     getContentBasedRecommendationsFromSearch,
+    getContentBasedRecommendationsFromUserHistory,
     getHybridRecommendations,
+    getFlashSaleRecommendations,
 
     debugGetCollaborativeRecommendations,
     debugGetHybridRecommendations
