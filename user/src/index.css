@@ -30,6 +30,7 @@
     --chart-5: 27 87% 67%;
     --radius: 0.5rem
   }
+
   .dark {
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
@@ -62,6 +63,7 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -71,12 +73,15 @@
   .animate-fade-in {
     animation: fadeIn 1s ease-out forwards;
   }
+
   .animation-delay-200 {
     animation-delay: 200ms;
   }
+
   .animation-delay-400 {
     animation-delay: 400ms;
   }
+
   .animate-pulse-slow {
     animation: pulse 10s infinite ease-in-out;
   }
@@ -86,6 +91,7 @@
       opacity: 0;
       transform: translateY(20px);
     }
+
     to {
       opacity: 1;
       transform: translateY(0);
@@ -93,11 +99,43 @@
   }
 
   @keyframes pulse {
-    0%, 100% {
+
+    0%,
+    100% {
       opacity: 0.5;
     }
+
     50% {
       opacity: 1;
     }
   }
+}
+
+/* Image Upload Component Styles */
+.image-upload-container {
+  position: relative;
+}
+
+.upload-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.image-upload-container:hover .upload-overlay {
+  opacity: 1;
+}
+
+.upload-overlay-text {
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
 }

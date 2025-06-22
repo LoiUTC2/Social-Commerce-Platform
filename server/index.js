@@ -22,7 +22,7 @@ app.locals.socketHandler = socketHandler
 
 // app.use(cors());
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'], // Mảng các địa chỉ được phép
+  origin: ['http://localhost:3000', 'http://192.168.1.88:3000', 'http://localhost:3001', 'http://192.168.1.88:3001'], // Mảng các địa chỉ được phép
   credentials: true, // QUAN TRỌNG để gửi cookie
 }));
 
@@ -117,6 +117,6 @@ initializeCronJobs();
 //   console.log('🚀 Server started on port 5000');
 // });
 
-server.listen(5000, () => {
+server.listen(5000, '0.0.0.0', () => {
   console.log('🚀 Server started on port 5000');
 });

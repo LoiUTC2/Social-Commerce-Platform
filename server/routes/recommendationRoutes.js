@@ -6,6 +6,8 @@ const Product = require('../models/Product');
 const Post = require('../models/Post');
 const User = require('../models/User');
 const Shop = require('../models/Shop');
+const UserInteraction = require('../models/UserInteraction');
+const FlashSale = require('../models/FlashSale');
 
 const {
     loadMatrixFactorizationModel,
@@ -22,7 +24,6 @@ const {
 
 const { verifyToken, setActor } = require('../middleware/authMiddleware');
 const { requestLogger } = require('../middleware/requestLogger ');
-const UserInteraction = require('../models/UserInteraction');
 
 // Route lấy gợi ý chung (có thể là post, product, user, shop), chủ yếu để test chứ frontend ko có dùng
 router.get('/', requestLogger, setActor, async (req, res) => {

@@ -392,7 +392,7 @@ exports.getFlashSaleForSeller = async (req, res) => {
 exports.getMyFlashSales = async (req, res) => {
     try {
         const actor = req.actor;
-        if (!actor || actor.type !== 'Shop') {
+        if (!actor || actor.type !== 'shop') {
             return errorResponse(res, 'Chỉ tài khoản người bán mới được truy cập', 403);
         }
 
@@ -418,5 +418,287 @@ exports.getMyFlashSales = async (req, res) => {
         });
     } catch (err) {
         return errorResponse(res, 'Lỗi khi lấy danh sách Flash Sale', 500, err.message);
+    }
+};
+
+// 🔍 Tìm kiếm Flash Sale
+exports.searchFlashSales = async (req, res) => {
+    try {
+        const { 
+            q = '', // từ khóa tìm kiếm
+            status = 'all', // all, active, upcoming, ended
+            category,
+            minPrice,
+            maxPrice,
+            sortBy = 'createdAt',
+            sortOrder = 'desc',
+            page = 1, 
+            limit = 20,
+            populateProducts = 'true'
+        } = req.query;
+
+        // Tạo query object
+        const query = {
+            isActive: true,
+            isHidden: false,
+            approvalStatus: 'approved'
+        };
+
+        // Tìm kiếm theo tên hoặc mô tả
+        if (q.trim()) {
+            query.$or = [
+                { name: { $regex: q, $options: 'i' } },
+                { description: { $regex: q, $options: 'i' } },
+                { hashtags: { $in: [new RegExp(q, 'i')] } }
+            ];
+        }
+
+        // Lọc theo trạng thái thời gian
+        const now = new Date();
+        if (status === 'active') {
+            query.startTime = { $lte: now };
+            query.endTime = { $gte: now };
+        } else if (status === 'upcoming') {
+            query.startTime = { $gt: now };
+        } else if (status === 'ended') {
+            query.endTime = { $lt: now };
+        }
+
+        // Lọc theo giá (tìm trong products.salePrice)
+        if (minPrice || maxPrice) {
+            const priceFilter = {};
+            if (minPrice) priceFilter.$gte = parseFloat(minPrice);
+            if (maxPrice) priceFilter.$lte = parseFloat(maxPrice);
+            query['products.salePrice'] = priceFilter;
+        }
+
+        // Tính toán pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        // Tạo sort object
+        const sort = {};
+        sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+        // Thực hiện tìm kiếm
+        let flashSalesQuery = FlashSale.find(query)
+            .sort(sort)
+            .skip(skip)
+            .limit(parseInt(limit));
+
+        // Populate products nếu cần
+        if (populateProducts === 'true') {
+            flashSalesQuery = flashSalesQuery.populate({
+                path: 'products.product',
+                select: 'name images price discount stock slug ratings seller isActive',
+                populate: {
+                    path: 'seller',
+                    select: 'name avatar'
+                }
+            });
+        }
+
+        const [flashSales, total] = await Promise.all([
+            flashSalesQuery.exec(),
+            FlashSale.countDocuments(query)
+        ]);
+
+        // Lọc theo category nếu có (sau khi populate)
+        let filteredFlashSales = flashSales;
+        if (category && populateProducts === 'true') {
+            filteredFlashSales = flashSales.filter(fs => 
+                fs.products.some(p => 
+                    p.product && p.product.mainCategory && 
+                    p.product.mainCategory.toString() === category
+                )
+            );
+        }
+
+        // Enrich với status info
+        const enrichedFlashSales = filteredFlashSales.map(fs => {
+            const statusInfo = flashSaleService.getFlashSaleStatus(fs);
+            return {
+                ...fs.toObject(),
+                statusInfo
+            };
+        });
+
+        return successResponse(res, 'Tìm kiếm Flash Sale thành công', {
+            items: enrichedFlashSales,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: category ? filteredFlashSales.length : total,
+                totalPages: Math.ceil((category ? filteredFlashSales.length : total) / parseInt(limit))
+            },
+            searchInfo: {
+                query: q,
+                status,
+                category,
+                priceRange: { minPrice, maxPrice },
+                sortBy,
+                sortOrder
+            }
+        });
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi tìm kiếm Flash Sale', 500, err.message);
+    }
+};
+
+// 📊 Lấy thống kê Flash Sale
+exports.getFlashSaleStats = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const flashSale = await FlashSale.findById(id)
+            .populate({
+                path: 'products.product',
+                select: 'name price mainCategory',
+                populate: {
+                    path: 'mainCategory',
+                    select: 'name'
+                }
+            });
+
+        if (!flashSale) {
+            return errorResponse(res, 'Không tìm thấy Flash Sale', 404);
+        }
+
+        // Tính toán các thống kê cơ bản
+        const now = new Date();
+        const isActive = now >= flashSale.startTime && now <= flashSale.endTime;
+        const isUpcoming = now < flashSale.startTime;
+        const isEnded = now > flashSale.endTime;
+
+        // Thống kê sản phẩm
+        const productStats = {
+            totalProducts: flashSale.products.length,
+            totalStock: flashSale.products.reduce((sum, p) => sum + p.stockLimit, 0),
+            totalSold: flashSale.products.reduce((sum, p) => sum + p.soldCount, 0),
+            averageDiscount: 0,
+            topSellingProduct: null
+        };
+
+        // Tính discount trung bình và tìm sản phẩm bán chạy nhất
+        if (flashSale.products.length > 0) {
+            let totalDiscount = 0;
+            let topProduct = flashSale.products[0];
+
+            flashSale.products.forEach(p => {
+                if (p.product && p.product.price) {
+                    const discount = ((p.product.price - p.salePrice) / p.product.price) * 100;
+                    totalDiscount += discount;
+                }
+                
+                if (p.soldCount > topProduct.soldCount) {
+                    topProduct = p;
+                }
+            });
+
+            productStats.averageDiscount = Math.round(totalDiscount / flashSale.products.length);
+            if (topProduct.product) {
+                productStats.topSellingProduct = {
+                    id: topProduct.product._id,
+                    name: topProduct.product.name,
+                    soldCount: topProduct.soldCount,
+                    salePrice: topProduct.salePrice,
+                    category: topProduct.product.mainCategory?.name
+                };
+            }
+        }
+
+        // Tính tỷ lệ chuyển đổi
+        const conversionRate = flashSale.stats.totalClicks > 0 
+            ? ((flashSale.stats.totalPurchases / flashSale.stats.totalClicks) * 100).toFixed(2)
+            : 0;
+
+        // Tính tỷ lệ bán hàng
+        const sellThroughRate = productStats.totalStock > 0
+            ? ((productStats.totalSold / productStats.totalStock) * 100).toFixed(2)
+            : 0;
+
+        // Doanh thu trung bình mỗi đơn hàng
+        const averageOrderValue = flashSale.stats.totalPurchases > 0
+            ? Math.round(flashSale.stats.totalRevenue / flashSale.stats.totalPurchases)
+            : 0;
+
+        // Thống kê theo thời gian
+        const duration = flashSale.endTime - flashSale.startTime;
+        const durationHours = Math.round(duration / (1000 * 60 * 60));
+        
+        let timeStats = {};
+        if (isActive) {
+            const elapsed = now - flashSale.startTime;
+            const remaining = flashSale.endTime - now;
+            timeStats = {
+                status: 'active',
+                elapsedHours: Math.round(elapsed / (1000 * 60 * 60)),
+                remainingHours: Math.round(remaining / (1000 * 60 * 60)),
+                progressPercentage: Math.round((elapsed / duration) * 100)
+            };
+        } else if (isUpcoming) {
+            const timeToStart = flashSale.startTime - now;
+            timeStats = {
+                status: 'upcoming',
+                hoursToStart: Math.round(timeToStart / (1000 * 60 * 60))
+            };
+        } else if (isEnded) {
+            timeStats = {
+                status: 'ended',
+                hoursEnded: Math.round((now - flashSale.endTime) / (1000 * 60 * 60))
+            };
+        }
+
+        // Thống kê hiệu suất
+        const performanceStats = {
+            viewToClickRate: flashSale.stats.totalViews > 0 
+                ? ((flashSale.stats.totalClicks / flashSale.stats.totalViews) * 100).toFixed(2)
+                : 0,
+            clickToPurchaseRate: conversionRate,
+            revenuePerView: flashSale.stats.totalViews > 0
+                ? Math.round(flashSale.stats.totalRevenue / flashSale.stats.totalViews)
+                : 0,
+            revenuePerHour: durationHours > 0 && isEnded
+                ? Math.round(flashSale.stats.totalRevenue / durationHours)
+                : 0
+        };
+
+        // Tổng hợp tất cả thống kê
+        const comprehensiveStats = {
+            basicInfo: {
+                id: flashSale._id,
+                name: flashSale.name,
+                startTime: flashSale.startTime,
+                endTime: flashSale.endTime,
+                durationHours,
+                isFeatured: flashSale.isFeatured
+            },
+            timeStats,
+            engagementStats: {
+                totalViews: flashSale.stats.totalViews,
+                totalClicks: flashSale.stats.totalClicks,
+                totalPurchases: flashSale.stats.totalPurchases,
+                conversionRate: `${conversionRate}%`
+            },
+            revenueStats: {
+                totalRevenue: flashSale.stats.totalRevenue,
+                averageOrderValue,
+                revenuePerView: performanceStats.revenuePerView,
+                ...(performanceStats.revenuePerHour > 0 && { revenuePerHour: performanceStats.revenuePerHour })
+            },
+            productStats: {
+                ...productStats,
+                sellThroughRate: `${sellThroughRate}%`,
+                stockRemaining: productStats.totalStock - productStats.totalSold
+            },
+            performanceStats: {
+                viewToClickRate: `${performanceStats.viewToClickRate}%`,
+                clickToPurchaseRate: `${performanceStats.clickToPurchaseRate}%`,
+                sellThroughRate: `${sellThroughRate}%`
+            }
+        };
+
+        return successResponse(res, 'Lấy thống kê Flash Sale thành công', comprehensiveStats);
+    } catch (err) {
+        return errorResponse(res, 'Lỗi khi lấy thống kê Flash Sale', 500, err.message);
     }
 };

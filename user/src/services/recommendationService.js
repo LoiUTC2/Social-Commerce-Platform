@@ -1,6 +1,4 @@
 import api from '../utils/api';
-import { getShops } from "./shopService"
-
 
 // 🔮 Gợi ý tổng hợp (product, post, user, shop)
 export const getGeneralRecommendations = async ({ limit = 10, page = 1 }) => {
@@ -198,7 +196,7 @@ export const formatFlashSaleData = (flashSaleData) => {
 };
 
 // 🕐 Helper function để tính thời gian còn lại
-const calculateTimeRemaining = (endTime) => {
+export const calculateTimeRemaining = (endTime) => {
     if (!endTime) return null;
 
     const now = new Date();
@@ -216,7 +214,7 @@ const calculateTimeRemaining = (endTime) => {
 };
 
 // 💰 Helper function để tính phần trăm giảm giá
-const calculateDiscountPercent = (originalPrice, salePrice) => {
+export const calculateDiscountPercent = (originalPrice, salePrice) => {
     if (!originalPrice || !salePrice || salePrice >= originalPrice) return 0;
     return Math.round(((originalPrice - salePrice) / originalPrice) * 100);
 };
