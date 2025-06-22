@@ -1,6 +1,6 @@
 import React from 'react';
 import Banner from '../../components/marketplace/Banner';
-import FlashSale from '../../components/marketplace/FlashSale';
+import FlashSale from '../../components/marketplace/flash-sales/FlashSale';
 import MarketplaceCategory from '../../components/marketplace/MarketplaceCategory';
 import TopShops from "../../components/marketplace/shops/TopShops"
 import FeaturedProducts from '../../components/marketplace/products/FeaturedProducts';
@@ -13,7 +13,9 @@ const PlaceMarketPage = () => {
     <main className="w-full space-y-8 bg-gray-50">
       <Banner />
       <MarketplaceCategory />
+      
       <FlashSale />
+
       <TopShops />
 
       {/* Sản phẩm nổi bật */}

@@ -27,4 +27,10 @@ router.get('/:id/manage', verifyToken, setActor, ensureSessionId, controller.get
 // Tracking routes
 router.post('/:id/track-purchase', setActor, ensureSessionId, controller.trackFlashSalePurchase);
 
+// 🔍 Tìm kiếm Flash Sale
+router.get('/search', controller.searchFlashSales);
+
+// 📊 Lấy thống kê Flash Sale
+router.get('/:id/stats', controller.getFlashSaleStats);
+
 module.exports = router;

@@ -7,12 +7,13 @@ import StoreInfo from '../pages/seller/Store/StoreInfo';
 import BusinessInfo from '../pages/seller/Store/BusinessInfo';
 import SellerInfo from '../pages/seller/Store/SellerInfo';
 import Products from '../pages/seller/Products/Products';
-import Support from '../pages/seller/Support';
-import Marketing from '../pages/seller/Marketing';
+import Support from '../pages/seller/Support/Support';
+import Marketing from '../pages/seller/Marketing/advertisement/Marketing';
 import Dashboard from '../pages/seller/Dashboard';
 import AddProduct from '../pages/seller/Products/AddProduct';
 import ProductDetail from '../pages/seller/Products/ProductDetail';
 import EditProduct from '../pages/seller/Products/EditProduct';
+import FlashSales from '../pages/seller/Marketing/flash-sales/FlashSales';
 
 const SellerRoutes = (
   <Route path="/seller" element={<DashboardLayout />}>
@@ -34,7 +35,8 @@ const SellerRoutes = (
     <Route path="edit-product/:slug" element={<EditProduct />} />
 
     <Route path="support" element={<Support />} />
-    <Route path="marketing" element={<Marketing />} />
+
+    <Route path="flash-sale" element={<FlashSales />} />
   </Route>
 );
 

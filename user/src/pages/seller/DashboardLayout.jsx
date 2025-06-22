@@ -9,7 +9,7 @@ const navItems = [
   { path: '/seller/customers', label: 'Quản lí khách hàng' },
   { path: '/seller/products', label: 'Quản lí sản phẩm' },
   { path: '/seller/support', label: 'Hỗ trợ khách hàng' },
-  { path: '/seller/marketing', label: 'Marketing' },
+  { path: '/seller/flash-sale', label: 'Marketing' },
   { path: '/seller/store', label: 'Thiết lập cửa hàng' },
 ];
 

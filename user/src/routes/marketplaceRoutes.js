@@ -8,16 +8,20 @@ import PlaceMarketPage from '../pages/marketplace/PlaceMarketPage';
 import FeaturedProductsPage from '../pages/marketplace/placeMarketProduct/FeaturedProductsPage';
 import SuggestedProductsPage from '../pages/marketplace/placeMarketProduct/SuggestedProductsPage';
 import LatestProductsPage from '../pages/marketplace/placeMarketProduct/LatestProductsPage';
+import FlashSalesPage from '../pages/marketplace/placeMarketFlashSale/FlashSalesPage';
+import AIFlashSaleRecommendationsPage from '../pages/marketplace/placeMarketFlashSale/AIFlashSaleRecommendationsPage';
 
 const MarketplaceRoutes = (
   <Route path="/marketplace" element={<MainLayout />}>
-    <Route index element={<PlaceMarketPage/>} />
+    <Route index element={<PlaceMarketPage />} />
     <Route path="/marketplace/products/:slug" element={<ProductDetail />} />
     <Route path="/marketplace/cart" element={<CartPage />} />
     <Route path="/marketplace/checkout" element={<CheckoutPage />} />
     <Route path="/marketplace/featured-products" element={<FeaturedProductsPage />} />
     <Route path="/marketplace/suggested-products" element={<SuggestedProductsPage />} />
     <Route path="/marketplace/latest-products" element={<LatestProductsPage />} />
+    <Route path="/marketplace/flash-sales" element={<FlashSalesPage />} />
+    <Route path="/marketplace/flash-sales-recommendation" element={<AIFlashSaleRecommendationsPage />} />
   </Route>
 );
 

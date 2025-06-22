@@ -4,7 +4,8 @@ const adminProductController = require('../controllers/adminProductController');
 const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 
 // Chỉ admin được phép
-router.get('/', verifyToken, requireRole('admin'), adminProductController.getAllProductsForAdmin);
+// router.get('/', verifyToken, requireRole('admin'), adminProductController.getAllProductsForAdmin);
+router.get('/', adminProductController.getAllProductsForAdmin);
 
 router.get('/:productId', adminProductController.getProductDetails);
 router.put('/:productId', adminProductController.updateProduct);

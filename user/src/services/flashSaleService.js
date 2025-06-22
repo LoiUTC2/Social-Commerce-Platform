@@ -89,3 +89,17 @@ export const trackFlashSalePurchase = async (id, data) => {
     const res = await api.post(`/flash-sales/${id}/track-purchase`, data);
     return res.data;
 };
+
+// 🔍 Tìm kiếm Flash Sale
+export const searchFlashSales = async (query, filters = {}) => {
+    const res = await api.get("/flash-sales/search", {
+        params: { q: query, ...filters },
+    })
+    return res.data
+}
+
+// 📊 Lấy thống kê Flash Sale
+export const getFlashSaleStats = async (id) => {
+    const res = await api.get(`/flash-sales/${id}/stats`)
+    return res.data
+}
