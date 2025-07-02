@@ -1,5 +1,6 @@
 import React from 'react';
-import Banner from '../../components/marketplace/Banner';
+import Banner from '../../components/marketplace/banner/Banner';
+import BannerShowcase from '../../components/marketplace/banner/BannerShowcase';
 import FlashSale from '../../components/marketplace/flash-sales/FlashSale';
 import MarketplaceCategory from '../../components/marketplace/MarketplaceCategory';
 import TopShops from "../../components/marketplace/shops/TopShops"
@@ -12,6 +13,8 @@ const PlaceMarketPage = () => {
   return (
     <main className="w-full space-y-8 bg-gray-50">
       <Banner />
+      {/* <BannerShowcase /> */}
+      
       <MarketplaceCategory />
       
       <FlashSale />

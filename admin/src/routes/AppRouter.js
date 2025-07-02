@@ -15,6 +15,11 @@ import ProductDetail from '../pages/management/products/ProductDetail';
 import ProductList from '../pages/management/products/ProductList';
 import ProductEdit from '../pages/management/products/ProductEdit';
 
+// CATEGORY MANAGEMENT 
+import CategoryList from "../pages/management/categories/CategoryList"
+import CategoryDetail from "../pages/management/categories/CategoryDetail"
+import CategoryForm from "../pages/management/categories/CategoryForm"
+import CategoryMove from "../pages/management/categories/CategoryMove"
 
 // import PostsReview from '../pages/moderation/PostsReview';
 // import ContentReview from '../pages/moderation/ContentReview';
@@ -60,6 +65,13 @@ export default function AppRouter() {
                     <Route path="products" element={<ProductList />} />
                     <Route path="products/:productId" element={<ProductDetail />} />
                     <Route path="products/:productId/edit" element={<ProductEdit />} />
+
+                    {/* CATEGORY MANAGEMENT ROUTE */}
+                    <Route path="categories" element={<CategoryList />} />
+                    <Route path="categories/create" element={<CategoryForm />} />
+                    <Route path="categories/:categoryId" element={<CategoryDetail />} />
+                    <Route path="categories/:categoryId/edit" element={<CategoryForm />} />
+                    <Route path="categories/:categoryId/move" element={<CategoryMove />} />
 
                     {/* Kiểm duyệt & Nội dung */}
                     {/* <Route path="posts-review" element={<PostsReview />} />

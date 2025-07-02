@@ -5,16 +5,18 @@ import avatar1 from '../../assets/ramos.webp'
 import avatar2 from '../../assets/rice.webp'
 import avatar3 from '../../assets/kaka.webp'
 import avatar4 from '../../assets/áensio.jpg'
+import avatar5 from '../../assets/messi.jpg'
+import avatar6 from '../../assets/01jw8pzeqyhcg8n95zrs.webp'
 
 
 const StoryBar = () => {
   const stories = [
     { id: 1, name: 'Noncakeith', image: avatar4, avatar: avatar},
-    { id: 2, name: 'Thùy Linh', image: avatar1, avatar: avatar },
-    { id: 3, name: 'Quốc Khánh', image: avatar2, avatar: avatar },
+    { id: 2, name: 'Thùy Linh', image: avatar6, avatar: avatar },
+    { id: 3, name: 'Quốc Khánh', image: avatar5, avatar: avatar },
     { id: 4, name: 'Nga Nga', image: avatar3, avatar: avatar },
     { id: 5, name: 'Quốc Khánh', image: avatar1, avatar: avatar },
-    { id: 6, name: 'Nga Nga', image: avatar4, avatar: avatar },
+    { id: 6, name: 'Nga Nga', image: avatar2, avatar: avatar },
   ];
 
   return (

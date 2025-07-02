@@ -1,17 +1,42 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "../../components/ui/button"
 import { Plus, Play, ShoppingCart, Eye } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
-export default function MediaGallery({ media = [], postId, hasProducts = false, compact = false }) {
+export default function MediaGallery({ media = [], postId, hasProducts = false, compact = false, isVisible = true }) {
     const navigate = useNavigate()
     const [currentIndex, setCurrentIndex] = useState(0)
+    const videoRefs = useRef([])
 
     const totalMediaCount = media.length
     const displayedMedia = media.slice(0, compact ? 3 : 4)
     const remainingMedia = totalMediaCount > (compact ? 3 : 4) ? totalMediaCount - (compact ? 3 : 4) : 0
+
+    // Thêm useEffect để handle video play/pause dựa trên isVisible
+    useEffect(() => {
+        const videos = videoRefs.current;
+
+        if (isVisible) {
+            // Play videos khi feed item visible
+            videos.forEach(video => {
+                if (video && video.paused) {
+                    video.play().catch(err => {
+                        // Ignore autoplay policy errors
+                        console.log('Video autoplay prevented:', err);
+                    });
+                }
+            });
+        } else {
+            // Pause videos khi feed item không visible
+            videos.forEach(video => {
+                if (video && !video.paused) {
+                    video.pause();
+                }
+            });
+        }
+    }, [isVisible]);
 
     const getLayoutClass = () => {
         const count = displayedMedia.length
@@ -44,6 +69,10 @@ export default function MediaGallery({ media = [], postId, hasProducts = false, 
     const isVideo = (mediaItem) => {
         return mediaItem.type === "video" || mediaItem.url.match(/\.(mp4|mov|avi|webm)$/i)
     }
+    // Thêm function để handle video ref
+    const setVideoRef = (index) => (el) => {
+        videoRefs.current[index] = el;
+    };
 
     const navigateToPostDetail = () => {
         navigate(`/feed/post/${postId}`)
@@ -78,15 +107,17 @@ export default function MediaGallery({ media = [], postId, hasProducts = false, 
                             {isVideo(mediaItem) ? (
                                 <div className="relative w-full h-full flex justify-center items-center">
                                     <video
+                                    ref={setVideoRef(idx)}
                                         src={mediaItem.url}
                                         className="max-w-full max-h-full object-contain rounded-lg shadow-sm"
                                         muted
                                         loop
                                         playsInline
-                                        autoPlay={true}
+                                        autoPlay={false}
                                         controls={true}
-                                        // onMouseEnter={(e) => e.target.play()}
-                                        // onMouseLeave={(e) => e.target.pause()}
+                                        preload="metadata"  // Thêm preload để tối ưu
+                                    // onMouseEnter={(e) => e.target.play()}
+                                    // onMouseLeave={(e) => e.target.pause()}
                                     />
 
                                     {/* Video overlay */}

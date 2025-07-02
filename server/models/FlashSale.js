@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const Product = require('./Product');
 
 const flashSaleSchema = new mongoose.Schema({
     name: { type: String, required: true, trim: true },
@@ -118,6 +119,23 @@ flashSaleSchema.pre('findOneAndUpdate', async function (next) {
         next();
     } catch (error) {
         next(error);
+    }
+});
+
+// MIDDLEWARE: Tự động cập nhật products khi flash sale thay đổi
+flashSaleSchema.post('save', async function() {
+    if (this.isActive && this.approvalStatus === 'approved') {
+        // Cập nhật tất cả products trong flash sale
+        for (const item of this.products) {
+            await Product.updateFlashSaleStatus(item.product, {
+                flashSaleId: this._id,
+                salePrice: item.salePrice,
+                stockLimit: item.stockLimit,
+                soldCount: item.soldCount,
+                startTime: this.startTime,
+                endTime: this.endTime
+            });
+        }
     }
 });
 

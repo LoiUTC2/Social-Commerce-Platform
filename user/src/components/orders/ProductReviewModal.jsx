@@ -4,46 +4,86 @@ import { useState } from "react"
 import { Button } from "../ui/button"
 import { Textarea } from "../ui/textarea"
 import { Input } from "../ui/input"
-import { Star, X, Upload } from "lucide-react"
+import { Star, X, Upload, Video, Image as ImageIcon } from "lucide-react"
 import { createReview } from "../../services/productReviewService"
+import { uploadToCloudinary } from "../../utils/uploadToCloudinary"
 import { toast } from "sonner"
 
 export default function ProductReviewModal({ order, product, onClose, onSuccess }) {
     const [rating, setRating] = useState(5)
     const [title, setTitle] = useState("")
     const [content, setContent] = useState("")
-    const [images, setImages] = useState([])
+    const [media, setMedia] = useState([]) // Changed from images to media to support both images and videos
     const [loading, setLoading] = useState(false)
+    const [uploadingMedia, setUploadingMedia] = useState(false)
     const [currentProductIndex, setCurrentProductIndex] = useState(0)
 
     // If no specific product is selected, show all products
     const productsToReview = product ? [product] : order?.items || []
     const currentProduct = productsToReview[currentProductIndex]
 
-    const handleImageUpload = (e) => {
+    const handleMediaUpload = async (e) => {
         const files = Array.from(e.target.files)
-        if (files.length + images.length > 5) {
-            toast.error("Chỉ được tải lên tối đa 5 hình ảnh")
+
+        // Check total media limit (5 files max)
+        if (files.length + media.length > 5) {
+            toast.error("Chỉ được tải lên tối đa 5 file (ảnh/video)")
             return
         }
 
-        const promises = files.map((file) => {
-            return new Promise((resolve) => {
-                const reader = new FileReader()
-                reader.onload = (e) => {
-                    resolve(e.target.result)
-                }
-                reader.readAsDataURL(file)
-            })
+        // Check file size (max 10MB for images, 50MB for videos)
+        const invalidFiles = files.filter(file => {
+            if (file.type.startsWith('image/')) {
+                return file.size > 10 * 1024 * 1024 // 10MB for images
+            } else if (file.type.startsWith('video/')) {
+                return file.size > 50 * 1024 * 1024 // 50MB for videos
+            }
+            return true // Invalid file type
         })
 
-        Promise.all(promises).then((results) => {
-            setImages((prev) => [...prev, ...results])
-        })
+        if (invalidFiles.length > 0) {
+            toast.error("File quá lớn! Ảnh tối đa 10MB, video tối đa 50MB")
+            return
+        }
+
+        try {
+            setUploadingMedia(true)
+            toast.info("Đang tải lên file...")
+
+            const uploadPromises = files.map(async (file) => {
+                try {
+                    const cloudinaryUrl = await uploadToCloudinary(file)
+                    return {
+                        url: cloudinaryUrl,
+                        type: file.type.startsWith('image/') ? 'image' : 'video',
+                        name: file.name,
+                        size: file.size
+                    }
+                } catch (error) {
+                    console.error(`Lỗi upload file ${file.name}:`, error)
+                    toast.error(`Không thể tải lên ${file.name}`)
+                    return null
+                }
+            })
+
+            const uploadResults = await Promise.all(uploadPromises)
+            const successfulUploads = uploadResults.filter(result => result !== null)
+
+            if (successfulUploads.length > 0) {
+                setMedia(prev => [...prev, ...successfulUploads])
+                toast.success(`Đã tải lên ${successfulUploads.length} file thành công!`)
+            }
+
+        } catch (error) {
+            console.error("Lỗi khi tải lên file:", error)
+            toast.error("Không thể tải lên file")
+        } finally {
+            setUploadingMedia(false)
+        }
     }
 
-    const removeImage = (index) => {
-        setImages((prev) => prev.filter((_, i) => i !== index))
+    const removeMedia = (index) => {
+        setMedia(prev => prev.filter((_, i) => i !== index))
     }
 
     const handleSubmit = async () => {
@@ -63,7 +103,8 @@ export default function ProductReviewModal({ order, product, onClose, onSuccess 
                 rating,
                 title: title.trim() || undefined, // Optional field
                 content: content.trim(),
-                images, // Array of image URLs or base64 strings
+                images: media.filter(item => item.type === 'image').map(item => item.url), // Only image URLs
+                videos: media.filter(item => item.type === 'video').map(item => item.url), // Only video URLs
             }
 
             const response = await createReview(reviewData)
@@ -77,7 +118,7 @@ export default function ProductReviewModal({ order, product, onClose, onSuccess 
                     setRating(5)
                     setTitle("")
                     setContent("")
-                    setImages([])
+                    setMedia([])
                 } else {
                     if (onSuccess) onSuccess()
                     onClose()
@@ -99,6 +140,14 @@ export default function ProductReviewModal({ order, product, onClose, onSuccess 
         3: "Bình thường",
         4: "Hài lòng",
         5: "Rất hài lòng",
+    }
+
+    const formatFileSize = (bytes) => {
+        if (bytes === 0) return '0 Bytes'
+        const k = 1024
+        const sizes = ['Bytes', 'KB', 'MB', 'GB']
+        const i = Math.floor(Math.log(bytes) / Math.log(k))
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
     }
 
     if (!currentProduct) {
@@ -188,50 +237,97 @@ export default function ProductReviewModal({ order, product, onClose, onSuccess 
                             <p className="text-xs text-gray-500 mt-1 text-right">{content.length}/1000</p>
                         </div>
 
-                        {/* Images */}
+                        {/* Media Upload */}
                         <div className="mb-6">
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Thêm hình ảnh (tối đa 5 ảnh)
+                                Thêm ảnh/video (tối đa 5 file)
                             </label>
+                            <p className="text-xs text-gray-500 mb-3">
+                                Ảnh tối đa 10MB, video tối đa 50MB. Hỗ trợ JPG, PNG, MP4, MOV
+                            </p>
 
                             <div className="flex flex-wrap gap-3">
-                                {images.map((image, imgIndex) => (
-                                    <div key={imgIndex} className="relative">
-                                        <img
-                                            src={image || "/placeholder.svg"}
-                                            alt={`Review ${imgIndex + 1}`}
-                                            className="w-20 h-20 object-cover rounded-lg border border-gray-200"
-                                        />
+                                {media.map((item, index) => (
+                                    <div key={index} className="relative">
+                                        {item.type === 'image' ? (
+                                            <img
+                                                src={item.url}
+                                                alt={`Review ${index + 1}`}
+                                                className="w-20 h-20 object-cover rounded-lg border border-gray-200"
+                                            />
+                                        ) : (
+                                            <div className="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 flex flex-col items-center justify-center">
+                                                <Video className="w-6 h-6 text-gray-500" />
+                                                <span className="text-xs text-gray-500 mt-1 text-center px-1">
+                                                    {formatFileSize(item.size)}
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        {/* Media type indicator */}
+                                        <div className="absolute top-1 left-1 bg-black/70 text-white rounded px-1 text-xs">
+                                            {item.type === 'image' ? (
+                                                <ImageIcon className="w-3 h-3" />
+                                            ) : (
+                                                <Video className="w-3 h-3" />
+                                            )}
+                                        </div>
+
+                                        {/* Remove button */}
                                         <button
-                                            onClick={() => removeImage(imgIndex)}
-                                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+                                            onClick={() => removeMedia(index)}
+                                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
                                         >
                                             <X className="w-3 h-3" />
                                         </button>
                                     </div>
                                 ))}
 
-                                {images.length < 5 && (
-                                    <label className="w-20 h-20 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-pink-400 transition-colors">
-                                        <Upload className="w-6 h-6 text-gray-400" />
-                                        <span className="text-xs text-gray-500 mt-1">Thêm ảnh</span>
-                                        <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
+                                {media.length < 5 && (
+                                    <label className={`w-20 h-20 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-pink-400 transition-colors ${uploadingMedia ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                        {uploadingMedia ? (
+                                            <>
+                                                <div className="w-6 h-6 border-2 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
+                                                <span className="text-xs text-gray-500 mt-1">Đang tải...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Upload className="w-6 h-6 text-gray-400" />
+                                                <span className="text-xs text-gray-500 mt-1">Thêm file</span>
+                                            </>
+                                        )}
+                                        <input
+                                            type="file"
+                                            multiple
+                                            accept="image/*,video/*"
+                                            onChange={handleMediaUpload}
+                                            className="hidden"
+                                            disabled={uploadingMedia}
+                                        />
                                     </label>
                                 )}
                             </div>
+
+                            {/* Media summary */}
+                            {media.length > 0 && (
+                                <div className="mt-3 text-xs text-gray-500">
+                                    {media.filter(item => item.type === 'image').length} ảnh, {' '}
+                                    {media.filter(item => item.type === 'video').length} video
+                                </div>
+                            )}
                         </div>
 
                         {/* Submit Button */}
                         <div className="flex gap-3">
-                            <Button variant="outline" onClick={onClose} className="flex-1" disabled={loading}>
+                            <Button variant="outline" onClick={onClose} className="flex-1" disabled={loading || uploadingMedia}>
                                 Hủy
                             </Button>
                             <Button
                                 onClick={handleSubmit}
-                                disabled={loading || !content.trim()}
+                                disabled={loading || uploadingMedia || !content.trim()}
                                 className="flex-1 bg-pink-600 hover:bg-pink-700"
                             >
-                                {loading ? "Đang gửi..." : "Gửi đánh giá"}
+                                {loading ? "Đang gửi..." : uploadingMedia ? "Đang tải file..." : "Gửi đánh giá"}
                             </Button>
                         </div>
                     </div>

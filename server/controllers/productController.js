@@ -8,6 +8,7 @@ const Post = require('../models/Post');
 const ProductReviews = require('../models/ProductReviews');
 const Hashtag = require('../models/Hashtags');
 const geoip = require('geoip-lite');
+const moment = require('moment');
 
 const {
     getHybridRecommendations,
@@ -751,7 +752,7 @@ exports.getSuggestedProducts = async (req, res) => {
                         isActive: true
                     })
                         .populate('mainCategory', 'name slug')
-                        .populate('seller', 'username shopName avatar')
+                        .populate('seller', 'name avatar')
                         .lean();
 
                     // Sắp xếp theo thứ tự AI recommendations và thêm hybridScore nếu có
@@ -1096,10 +1097,30 @@ exports.getProductDetailForUser = async (req, res) => {
         })
             .populate('seller', 'name avatar slug stats.rating.avg')
             .populate('mainCategory', 'name slug')
-            .populate('categories', 'name slug');
+            .populate('categories', 'name slug')
+            // THÊM: Populate thông tin flash sale
+            .populate({
+                path: 'currentFlashSale.flashSaleId',
+                select: 'name description slug startTime endTime banner isFeatured'
+            });
 
         if (!product) {
             return errorResponse(res, 'Không tìm thấy sản phẩm hoặc sản phẩm đã ngừng bán', 404);
+        }
+
+        // THÊM: Tự động kiểm tra và cập nhật trạng thái flash sale
+        const now = new Date();
+        if (product.currentFlashSale && product.currentFlashSale.isActive) {
+            // Kiểm tra xem flash sale có còn hợp lệ không
+            if (now > product.currentFlashSale.endTime || 
+                product.currentFlashSale.soldCount >= product.currentFlashSale.stockLimit) {
+                
+                // Tự động tắt flash sale nếu hết hạn hoặc hết stock
+                await Product.findByIdAndUpdate(product._id, {
+                    'currentFlashSale.isActive': false
+                });
+                product.currentFlashSale.isActive = false;
+            }
         }
 
         // Lấy sản phẩm liên quan (cùng danh mục)
@@ -1213,8 +1234,51 @@ exports.getProductDetailForUser = async (req, res) => {
             )?.selectedVariant
         }));
 
+        // THÊM: Tính toán thông tin giá và flash sale
+        const pricingInfo = {
+            originalPrice: product.price,
+            regularPrice: product.regularPrice, // Sử dụng virtual field
+            finalPrice: product.finalPrice, // Sử dụng virtual field
+            discountInfo: product.discountInfo, // Sử dụng virtual field
+            currency: 'VND' // Có thể config sau
+        };
+
+        // THÊM: Thông tin flash sale chi tiết
+        let flashSaleInfo = null;
+        if (product.isInFlashSale) {
+            const timeRemaining = product.currentFlashSale.endTime - now;
+            const stockRemaining = product.currentFlashSale.stockLimit - product.currentFlashSale.soldCount;
+            
+            flashSaleInfo = {
+                id: product.currentFlashSale.flashSaleId?._id,
+                name: product.currentFlashSale.flashSaleId?.name,
+                description: product.currentFlashSale.flashSaleId?.description,
+                banner: product.currentFlashSale.flashSaleId?.banner,
+                salePrice: product.currentFlashSale.salePrice,
+                originalStockLimit: product.currentFlashSale.stockLimit,
+                soldCount: product.currentFlashSale.soldCount,
+                stockRemaining: Math.max(0, stockRemaining),
+                startTime: product.currentFlashSale.startTime,
+                endTime: product.currentFlashSale.endTime,
+                timeRemaining: Math.max(0, timeRemaining),
+                isActive: product.currentFlashSale.isActive,
+                // THÊM: Thông tin hiển thị
+                urgency: {
+                    stockPercentage: Math.round((product.currentFlashSale.soldCount / product.currentFlashSale.stockLimit) * 100),
+                    isAlmostSoldOut: stockRemaining <= 5, // Sắp hết hàng khi còn <= 5
+                    isEndingSoon: timeRemaining <= 3600000, // Sắp kết thúc khi còn <= 1 giờ (ms)
+                    timeDisplay: moment.duration(timeRemaining).humanize()
+                }
+            };
+        }
+
         return successResponse(res, 'Lấy thông tin sản phẩm thành công', {
-            product,
+            product: {
+                ...product.toObject(),
+                // THÊM: Bổ sung thông tin pricing và flash sale
+                pricing: pricingInfo,
+                flashSale: flashSaleInfo
+            },
             relatedProducts,
             reviews: {
                 data: reviewsWithLikesCount,

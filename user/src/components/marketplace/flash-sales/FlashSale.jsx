@@ -123,8 +123,7 @@ const FlashSale = () => {
 
   return (
     <>
-    {/* AI Recommended Flash Sales Section */}
-      <AIRecommendedFlashSales />
+      {/* AI Recommended Flash Sales Section */}
       <div className="bg-gradient-to-r from-pink-50 to-rose-50 rounded-2xl shadow-lg p-6 mb-8">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
@@ -234,7 +233,7 @@ const FlashSale = () => {
           )}
         </div>
       </div>
-
+      <AIRecommendedFlashSales />
       {/* Flash Sale Detail Modal */}
       <FlashSaleDetailModal
         flashSale={selectedFlashSale}

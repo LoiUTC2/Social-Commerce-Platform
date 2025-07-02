@@ -130,7 +130,7 @@ exports.switchUserRole = async (req, res) => {
 
         return successResponse(res, `Chuyển sang vai trò ${targetRole} thành công`, data);
     } catch (err) {
-        return errorResponse(res, 'Lỗi khi chuyển vai trò', 500, err.message);
+        return errorResponse(res, 'Lỗi khi chuyển vai trò', 500, err.message)
     }
 };
 
@@ -138,7 +138,9 @@ exports.switchUserRole = async (req, res) => {
 exports.createShop = async (req, res) => {
     try {
         const userId = req.user.userId;
+
         // const userId = req.body.owner;
+        
         const existingUser = await User.findById(userId);
         if (!existingUser) return errorResponse(res, 'Người dùng không tồn tại', 404);
 
@@ -476,7 +478,7 @@ exports.getShops = async (req, res) => {
             .sort(sortOption)
             .skip((page - 1) * limit)
             .limit(Number(limit))
-            .select('name slug avatar logo description stats hashtags status productInfo.mainCategory')
+            .select('name slug avatar coverImage logo description stats hashtags status productInfo.mainCategory ')
             .populate('owner', 'fullName avatar')
             .populate('productInfo.mainCategory', 'name slug');
 

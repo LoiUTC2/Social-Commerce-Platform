@@ -43,7 +43,11 @@ export default function ProductCard({ product }) {
 
     const handleBuyNow = async (e) => {
         e.stopPropagation()
-
+        // Kiểm tra nếu sản phẩm có variants thì chuyển đến trang chi tiết
+        if (product.variants && product.variants.length > 0) {
+            navigate(`/marketplace/products/${product.slug}`)
+            return
+        }
         try {
             setIsBuyingNow(true)
             // Use buyNow function to add to cart and mark as "buy now"

@@ -16,6 +16,7 @@ import { getShopBySlug } from "../../services/shopService"
 import { getUserBySlug } from "../../services/authService"
 import { toggleFollow } from "../../services/followService"
 import { useFollow } from "../../contexts/FollowContext"
+import FollowersFollowingModal from "../../components/feed/FollowersFollowingModal"
 
 export default function Profile() {
   const { slug } = useParams();
@@ -43,14 +44,17 @@ export default function Profile() {
   const [currentSavedPage, setCurrentSavedPage] = useState(1)
   const [savedPostsInitialized, setSavedPostsInitialized] = useState(false)
 
+  const [showFollowModal, setShowFollowModal] = useState(false)
+  const [followModalTab, setFollowModalTab] = useState("followers")
+
   const lastPostElementRef = useRef()
   const lastSavedPostElementRef = useRef()
   const isOwnProfile = currentUser?.slug === slug
 
   const profileStats = {
     postsCount: userPosts.length || 0,
-    followersCount: followersCount || profileData?.followers?.length || profileData?.stats?.followers?.length || 0,
-    followingCount: profileData?.following?.length || 0,
+    followersCount: followersCount || profileData?.stats?.followersCount || 0,
+    followingCount: profileData?.stats?.followingCount || 0,
     likesReceived: 1250,
   }
 
@@ -247,11 +251,10 @@ export default function Profile() {
   //useEffect để set initial followersCount
   useEffect(() => {
     if (profileData) {
-      const initialFollowersCount = profileData?.followers?.length ||
-        profileData?.stats?.followers?.length || 0
+      const initialFollowersCount = profileData?.stats.followersCount || 0
       setFollowersCount(initialFollowersCount)
     }
-  }, [profileData])
+  }, [profileData, followersCount])
 
   // Load posts chỉ khi cần thiết
   useEffect(() => {
@@ -290,27 +293,47 @@ export default function Profile() {
     if (!currentUser || !profileData || followLoading) return
 
     setFollowLoading(true)
+
+    // OPTIMISTIC UPDATE - cập nhật UI ngay lập tức
+    const optimisticFollowStatus = !isFollowing
+    const currentFollowersCount = followersCount
+
+    setIsFollowing(optimisticFollowStatus)
+    setFollowersCount(prev => optimisticFollowStatus ? prev + 1 : prev - 1)
+
     try {
       const response = await toggleFollow({
         targetId: profileData._id,
         targetType: profileType
       })
 
-      const newFollowStatus = response.data.isFollowing
-      setIsFollowing(newFollowStatus)
-      setFollowersCount(response.data.followerCount)
+      // SYNC với server response (đảm bảo chính xác)
+      const actualFollowStatus = response.data.isFollowing
+      const actualFollowersCount = response.data.targetFollowersCount
 
-      // Cập nhật context cache
-      updateFollowStatus(profileData._id, profileType, newFollowStatus)
+      setIsFollowing(actualFollowStatus)
 
-      // Hiển thị thông báo thành công (có thể dùng toast)
+      if (actualFollowersCount !== undefined) {
+        setFollowersCount(actualFollowersCount)
+      }
+
+      updateFollowStatus(profileData._id, profileType, actualFollowStatus)
       console.log(response.message)
+
     } catch (error) {
+      // ROLLBACK về trạng thái ban đầu nếu lỗi
+      setIsFollowing(!optimisticFollowStatus)
+      setFollowersCount(currentFollowersCount)
       console.error("Lỗi khi toggle follow:", error)
-      // Hiển thị thông báo lỗi
     } finally {
       setFollowLoading(false)
     }
+  }
+
+  // Function để mở modal follow
+  const handleOpenFollowModal = (tabType) => {
+    setFollowModalTab(tabType)
+    setShowFollowModal(true)
   }
 
   // Xử lý tên hiển thị
@@ -466,16 +489,23 @@ export default function Profile() {
                       <div className="font-bold text-lg">{profileStats.postsCount}</div>
                       <div className="text-sm text-gray-600">Bài viết</div>
                     </div>
-                    <div className="text-center">
+
+                    <div
+                      className="text-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors"
+                      onClick={() => handleOpenFollowModal("followers")}
+                    >
                       <div className="font-bold text-lg">{profileStats.followersCount}</div>
-                      <div className="text-sm text-gray-600">Người theo dõi</div>
+                      <div className="text-sm text-gray-600 hover:text-pink-600">Người theo dõi</div>
                     </div>
-                    {profileType === 'user' && (
-                      <div className="text-center">
-                        <div className="font-bold text-lg">{profileStats.followingCount}</div>
-                        <div className="text-sm text-gray-600">Đang theo dõi</div>
-                      </div>
-                    )}
+
+                    <div
+                      className="text-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors"
+                      onClick={() => handleOpenFollowModal("following")}
+                    >
+                      <div className="font-bold text-lg">{profileStats.followingCount}</div>
+                      <div className="text-sm text-gray-600 hover:text-blue-600">Đang theo dõi</div>
+                    </div>
+
                     {profileType === 'shop' && (
                       <div className="text-center">
                         <div className="font-bold text-lg">{profileData?.stats?.orderCount || 0}</div>
@@ -500,8 +530,8 @@ export default function Profile() {
                       onClick={handleToggleFollow}
                       disabled={followLoading}
                       className={`flex items-center gap-2 transition-colors ${isFollowing
-                          ? 'bg-gray-500 hover:bg-gray-600 text-white'
-                          : 'bg-blue-500 hover:bg-blue-600 text-white'
+                        ? 'bg-pink-500 hover:bg-pink-600 text-white'
+                        : 'bg-blue-500 hover:bg-blue-600 text-white'
                         }`}
                     >
                       {followLoading ? (
@@ -766,6 +796,12 @@ export default function Profile() {
           </TabsContent>
         </Tabs>
       </div>
+      <FollowersFollowingModal
+        open={showFollowModal}
+        onOpenChange={setShowFollowModal}
+        userSlug={slug}
+        initialTab={followModalTab}
+      />
     </div>
   )
 }

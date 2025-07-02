@@ -26,7 +26,7 @@ const sendTokenCookies = (res, accessToken, refreshToken) => {
 
 exports.register = async (req, res) => {
     try {
-        const { fullName, email, password, gender, dateOfBirth, phone } = req.body;
+        const { fullName, email, password, gender, dateOfBirth, phone, address, bio} = req.body;
 
         const existingUser = await User.findOne({ email });
         if (existingUser) return errorResponse(res, 'Email đã tồn tại', 400);
@@ -40,6 +40,8 @@ exports.register = async (req, res) => {
             gender: gender || "other",
             dateOfBirth,
             phone,
+            bio,
+            address,
             roles: ['buyer'],
             role: 'buyer',
             ip: req.ip,

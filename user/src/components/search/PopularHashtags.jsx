@@ -18,10 +18,10 @@ const PopularHashtags = ({ onHashtagClick, className = "" }) => {
                 setIsLoading(true)
                 setError(null)
 
-                const response = await getPopularHashtags(15) // Lấy 15 hashtag phổ biến
+                const response = await getPopularHashtags({ limit: 8, page: 1 }) // Lấy 8 hashtag phổ biến
 
                 if (response.success) {
-                    setHashtags(response.data)
+                    setHashtags(response.data.hashtags || [])
                 } else {
                     setError("Không thể tải hashtag phổ biến")
                 }

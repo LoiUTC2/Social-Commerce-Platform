@@ -6,8 +6,13 @@ const { successResponse, errorResponse } = require('../utils/response');
 
 exports.createFlashSale = async (req, res) => {
     try {
-        const actor = req.actor;
-        if (!actor) return errorResponse(res, 'Không xác định được người dùng', 403);
+        const actor_id = req.actor._id;
+        const actor_type = req.actor.type;
+
+        // const actor_id = req.body.actorId; // Chạy Runner
+        // const actor_type = req.body.actorType; // Chạy RUNNER
+
+        if (!actor_id) return errorResponse(res, 'Không xác định được người dùng', 403);
 
         const {
             name,
@@ -33,9 +38,9 @@ exports.createFlashSale = async (req, res) => {
             endTime,
             banner,
             isFeatured,
-            createdBy: actor._id,
-            updatedBy: actor._id,
-            approvalStatus: actor.type === 'admin' ? 'approved' : 'pending'
+            createdBy: actor_id,
+            updatedBy: actor_id,
+            approvalStatus: actor_type === 'admin' ? 'approved' : 'pending'
         });
 
         return successResponse(res, 'Tạo flash sale thành công', flashSale);

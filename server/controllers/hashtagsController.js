@@ -82,19 +82,58 @@ const removeProductHashtagReferences = async (hashtagNames, productId) => {
     }
 };
 
-// Lấy hashtags có usageCount cao nhất
+// Lấy hashtags có usageCount cao nhất với phân trang
 exports.getPopularHashtags = async (req, res) => {
     try {
-        const { limit = 20 } = req.query;
+        const { 
+            limit = 20, 
+            page = 1, 
+            offset 
+        } = req.query;
 
+        const limitNum = parseInt(limit);
+        const pageNum = parseInt(page);
+        
+        // Tính toán skip: ưu tiên offset nếu có, không thì dùng page
+        let skip;
+        if (offset !== undefined) {
+            skip = parseInt(offset);
+        } else {
+            skip = (pageNum - 1) * limitNum;
+        }
+
+        // Đếm tổng số hashtags để tính pagination info
+        const totalCount = await Hashtag.countDocuments({});
+        
         const hashtags = await Hashtag.find({})
             .sort({ usageCount: -1, lastUsedAt: -1 })
-            .limit(parseInt(limit))
+            .skip(skip)
+            .limit(limitNum)
             .select('name usageCount lastUsedAt')
             .lean();
 
-        return successResponse(res, 'Lấy hashtags phổ biến thành công', hashtags);
+        // Tính toán thông tin phân trang
+        const totalPages = Math.ceil(totalCount / limitNum);
+        const hasNextPage = pageNum < totalPages;
+        const hasPrevPage = pageNum > 1;
 
+        const paginationInfo = {
+            currentPage: pageNum,
+            totalPages,
+            totalCount,
+            limit: limitNum,
+            hasNextPage,
+            hasPrevPage,
+            nextPage: hasNextPage ? pageNum + 1 : null,
+            prevPage: hasPrevPage ? pageNum - 1 : null
+        };
+
+        const responseData = {
+            hashtags,
+            pagination: paginationInfo
+        };
+
+        return successResponse(res, 'Lấy hashtags phổ biến thành công', responseData);
     } catch (error) {
         return errorResponse(res, 'Lỗi khi lấy hashtags phổ biến', 500, error.message);
     }

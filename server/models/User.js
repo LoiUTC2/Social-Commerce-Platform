@@ -21,6 +21,11 @@ const userSchema = new mongoose.Schema({
   likedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
   likedComments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Comment' }],
 
+  stats: {
+    followersCount: { type: Number, default: 0 },
+    followingCount: { type: Number, default: 0 }
+  },
+
   // Thống kê review
   reviewStats: {
     // Là khách hàng

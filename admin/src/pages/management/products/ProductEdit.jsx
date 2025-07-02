@@ -25,7 +25,8 @@ const ProductEdit = () => {
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [uploadProgress, setUploadProgress] = useState({})
-
+    const [isDragging, setIsDragging] = useState(false)
+    const [pasteZoneActive, setPasteZoneActive] = useState({ images: false, videos: false })
     // Form data
     const [formData, setFormData] = useState({
         name: "",
@@ -131,6 +132,54 @@ const ProductEdit = () => {
 
         setErrors(newErrors)
         return Object.keys(newErrors).length === 0
+    }
+
+    // Thêm function này vào component
+    const handlePaste = async (e, type = "image") => {
+        e.preventDefault()
+
+        const items = Array.from(e.clipboardData.items)
+        const files = []
+
+        for (const item of items) {
+            if (item.type.startsWith(type === "image" ? "image/" : "video/")) {
+                const file = item.getAsFile()
+                if (file) {
+                    files.push(file)
+                }
+            }
+        }
+
+        if (files.length > 0) {
+            await handleFileUpload(files, type)
+            toast.success(`Đã paste ${files.length} ${type === "image" ? "hình ảnh" : "video"} thành công!`)
+        } else {
+            toast.error(`Không tìm thấy ${type === "image" ? "hình ảnh" : "video"} trong clipboard`)
+        }
+    }
+
+    // Function xử lý drag and drop (bonus feature)
+    const handleDragOver = (e) => {
+        e.preventDefault()
+        setIsDragging(true)
+    }
+
+    const handleDragLeave = (e) => {
+        e.preventDefault()
+        setIsDragging(false)
+    }
+
+    const handleDrop = async (e, type = "image") => {
+        e.preventDefault()
+        setIsDragging(false)
+
+        const files = Array.from(e.dataTransfer.files).filter(file =>
+            file.type.startsWith(type === "image" ? "image/" : "video/")
+        )
+
+        if (files.length > 0) {
+            await handleFileUpload(files, type)
+        }
     }
 
     // Handle file upload
@@ -543,14 +592,25 @@ const ProductEdit = () => {
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
                                     <Label>Hình ảnh sản phẩm</Label>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() => document.getElementById("image-upload").click()}
-                                    >
-                                        <FiUpload className="w-4 h-4 mr-2" />
-                                        Tải lên hình ảnh
-                                    </Button>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setPasteZoneActive(prev => ({ ...prev, images: !prev.images }))}
+                                            className={cn(pasteZoneActive.images && "bg-blue-100 text-blue-700")}
+                                        >
+                                            📋 {pasteZoneActive.images ? "Tắt paste" : "Bật paste"}
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => document.getElementById("image-upload").click()}
+                                        >
+                                            <FiUpload className="w-4 h-4 mr-2" />
+                                            Tải lên
+                                        </Button>
+                                    </div>
                                     <input
                                         id="image-upload"
                                         type="file"
@@ -560,6 +620,31 @@ const ProductEdit = () => {
                                         onChange={(e) => handleFileUpload(e.target.files, "image")}
                                     />
                                 </div>
+
+                                {/* Paste Zone for Images */}
+                                {pasteZoneActive.images && (
+                                    <div
+                                        className={cn(
+                                            "border-2 border-dashed rounded-lg p-8 text-center transition-colors",
+                                            isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300 bg-gray-50"
+                                        )}
+                                        onPaste={(e) => handlePaste(e, "image")}
+                                        onDragOver={handleDragOver}
+                                        onDragLeave={handleDragLeave}
+                                        onDrop={(e) => handleDrop(e, "image")}
+                                        tabIndex={0}
+                                    >
+                                        <div className="space-y-2">
+                                            <div className="text-2xl">📸</div>
+                                            <div className="font-medium">Paste hình ảnh vào đây</div>
+                                            <div className="text-sm text-gray-600">
+                                                Nhấn <kbd className="px-2 py-1 bg-gray-200 rounded text-xs">Ctrl+V</kbd> để paste ảnh từ clipboard
+                                                <br />
+                                                hoặc kéo thả file vào đây
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {formData.images.length > 0 && (
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -600,14 +685,25 @@ const ProductEdit = () => {
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
                                     <Label>Video sản phẩm</Label>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() => document.getElementById("video-upload").click()}
-                                    >
-                                        <FiUpload className="w-4 h-4 mr-2" />
-                                        Tải lên video
-                                    </Button>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setPasteZoneActive(prev => ({ ...prev, videos: !prev.videos }))}
+                                            className={cn(pasteZoneActive.videos && "bg-blue-100 text-blue-700")}
+                                        >
+                                            📋 {pasteZoneActive.videos ? "Tắt paste" : "Bật paste"}
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => document.getElementById("video-upload").click()}
+                                        >
+                                            <FiUpload className="w-4 h-4 mr-2" />
+                                            Tải lên
+                                        </Button>
+                                    </div>
                                     <input
                                         id="video-upload"
                                         type="file"
@@ -617,6 +713,31 @@ const ProductEdit = () => {
                                         onChange={(e) => handleFileUpload(e.target.files, "video")}
                                     />
                                 </div>
+
+                                {/* Paste Zone for Videos */}
+                                {pasteZoneActive.videos && (
+                                    <div
+                                        className={cn(
+                                            "border-2 border-dashed rounded-lg p-8 text-center transition-colors",
+                                            isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300 bg-gray-50"
+                                        )}
+                                        onPaste={(e) => handlePaste(e, "video")}
+                                        onDragOver={handleDragOver}
+                                        onDragLeave={handleDragLeave}
+                                        onDrop={(e) => handleDrop(e, "video")}
+                                        tabIndex={0}
+                                    >
+                                        <div className="space-y-2">
+                                            <div className="text-2xl">🎥</div>
+                                            <div className="font-medium">Paste video vào đây</div>
+                                            <div className="text-sm text-gray-600">
+                                                Nhấn <kbd className="px-2 py-1 bg-gray-200 rounded text-xs">Ctrl+V</kbd> để paste video từ clipboard
+                                                <br />
+                                                hoặc kéo thả file vào đây
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {formData.videos.length > 0 && (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

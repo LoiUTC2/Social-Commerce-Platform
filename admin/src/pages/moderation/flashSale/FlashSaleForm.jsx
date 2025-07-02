@@ -359,58 +359,94 @@ const FlashSaleForm = () => {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label>Thời gian bắt đầu *</Label>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <Button
-                                                    variant="outline"
-                                                    className={cn(
-                                                        "w-full justify-start text-left font-normal",
-                                                        !formData.startTime && "text-muted-foreground",
-                                                    )}
-                                                >
-                                                    <FiCalendar className="mr-2 h-4 w-4" />
-                                                    {formData.startTime
-                                                        ? format(formData.startTime, "dd/MM/yyyy HH:mm", { locale: vi })
-                                                        : "Chọn ngày"}
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={formData.startTime}
-                                                    onSelect={(date) => handleDateChange(date, "startTime")}
-                                                    initialFocus
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
+                                        <div className="flex gap-2">
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <Button
+                                                        variant="outline"
+                                                        className="flex-1 justify-start text-left font-normal"
+                                                    >
+                                                        <FiCalendar className="mr-2 h-4 w-4" />
+                                                        {formData.startTime
+                                                            ? format(formData.startTime, "dd/MM/yyyy", { locale: vi })
+                                                            : "Chọn ngày"}
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0">
+                                                    <Calendar
+                                                        mode="single"
+                                                        selected={formData.startTime}
+                                                        onSelect={(date) => {
+                                                            if (date) {
+                                                                const newDate = new Date(formData.startTime);
+                                                                newDate.setFullYear(date.getFullYear());
+                                                                newDate.setMonth(date.getMonth());
+                                                                newDate.setDate(date.getDate());
+                                                                handleDateChange(newDate, "startTime");
+                                                            }
+                                                        }}
+                                                        initialFocus
+                                                    />
+                                                </PopoverContent>
+                                            </Popover>
+                                            <Input
+                                                type="time"
+                                                value={format(formData.startTime, "HH:mm")}
+                                                onChange={(e) => {
+                                                    const [hours, minutes] = e.target.value.split(':');
+                                                    const newDate = new Date(formData.startTime);
+                                                    newDate.setHours(parseInt(hours), parseInt(minutes));
+                                                    handleDateChange(newDate, "startTime");
+                                                }}
+                                                className="w-32"
+                                            />
+                                        </div>
                                     </div>
 
                                     <div className="space-y-2">
                                         <Label>Thời gian kết thúc *</Label>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <Button
-                                                    variant="outline"
-                                                    className={cn(
-                                                        "w-full justify-start text-left font-normal",
-                                                        !formData.endTime && "text-muted-foreground",
-                                                    )}
-                                                >
-                                                    <FiClock className="mr-2 h-4 w-4" />
-                                                    {formData.endTime
-                                                        ? format(formData.endTime, "dd/MM/yyyy HH:mm", { locale: vi })
-                                                        : "Chọn ngày"}
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={formData.endTime}
-                                                    onSelect={(date) => handleDateChange(date, "endTime")}
-                                                    initialFocus
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
+                                        <div className="flex gap-2">
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <Button
+                                                        variant="outline"
+                                                        className="flex-1 justify-start text-left font-normal"
+                                                    >
+                                                        <FiClock className="mr-2 h-4 w-4" />
+                                                        {formData.endTime
+                                                            ? format(formData.endTime, "dd/MM/yyyy", { locale: vi })
+                                                            : "Chọn ngày"}
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0">
+                                                    <Calendar
+                                                        mode="single"
+                                                        selected={formData.endTime}
+                                                        onSelect={(date) => {
+                                                            if (date) {
+                                                                const newDate = new Date(formData.endTime);
+                                                                newDate.setFullYear(date.getFullYear());
+                                                                newDate.setMonth(date.getMonth());
+                                                                newDate.setDate(date.getDate());
+                                                                handleDateChange(newDate, "endTime");
+                                                            }
+                                                        }}
+                                                        initialFocus
+                                                    />
+                                                </PopoverContent>
+                                            </Popover>
+                                            <Input
+                                                type="time"
+                                                value={format(formData.endTime, "HH:mm")}
+                                                onChange={(e) => {
+                                                    const [hours, minutes] = e.target.value.split(':');
+                                                    const newDate = new Date(formData.endTime);
+                                                    newDate.setHours(parseInt(hours), parseInt(minutes));
+                                                    handleDateChange(newDate, "endTime");
+                                                }}
+                                                className="w-32"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
 

@@ -126,10 +126,11 @@ export function CartProvider({ children }) {
 
     // Thêm sản phẩm vào giỏ
     const addItemToCart = async (productId, quantity = 1, selectedVariant = {}) => {
-        if (!isAuthenticated) {
-            toast.error("Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng")
-            throw new Error("Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng")
-        }
+        //Vì để lấy hành vi user chưa đăg nhập nên tạm thời đóng lại
+        // if (!isAuthenticated) {
+        //     toast.error("Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng")
+        //     throw new Error("Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng")
+        // }
 
         try {
             setLoading(true)
@@ -154,10 +155,10 @@ export function CartProvider({ children }) {
 
     // Mua ngay - thêm sản phẩm vào giỏ và tự động chọn (nhưng không xóa các lựa chọn khác)
     const buyNow = async (productId, quantity = 1, selectedVariant = {}) => {
-        if (!isAuthenticated) {
-            toast.error("Vui lòng đăng nhập để mua hàng")
-            throw new Error("Vui lòng đăng nhập để mua hàng")
-        }
+        // if (!isAuthenticated) {
+        //     toast.error("Vui lòng đăng nhập để mua hàng")
+        //     throw new Error("Vui lòng đăng nhập để mua hàng")
+        // }
 
         try {
             setLoading(true)

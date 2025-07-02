@@ -9,12 +9,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Card, CardContent } from "../../ui/card"
 import { Label } from "../../ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "../../ui/avatar"
-import { Save } from "lucide-react"
+import { Save, Upload, X, ImageIcon, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { updateShopBasicInfo, updateShopFeatureLevel } from "../../../services/shopService"
+import { uploadToCloudinary } from "../../../utils/uploadToCloudinary"
 
 export default function ShopEditModal({ shop, open, onOpenChange, onSuccess }) {
     const [loading, setLoading] = useState(false)
+    const [uploadingStates, setUploadingStates] = useState({
+        avatar: false,
+        logo: false,
+        coverImage: false,
+    })
+    const [dragOver, setDragOver] = useState(null) //tính năng copy-paste
+
     const [formData, setFormData] = useState({
         name: "",
         description: "",
@@ -94,11 +102,217 @@ export default function ShopEditModal({ shop, open, onOpenChange, onSuccess }) {
         }
     }
 
+    const handleImageUpload = async (event, imageType) => {
+        const file = event.target.files[0]
+        if (!file) return
+
+        // Validate file type
+        if (!file.type.startsWith("image/")) {
+            toast.error("Vui lòng chọn file hình ảnh")
+            return
+        }
+
+        // Validate file size (5MB max)
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error("Kích thước file không được vượt quá 5MB")
+            return
+        }
+
+        try {
+            setUploadingStates((prev) => ({ ...prev, [imageType]: true }))
+
+            const result = await uploadToCloudinary(file, {
+                onProgress: (progress) => {
+                    // You can add progress indicator here if needed
+                    console.log(`Upload ${imageType} progress: ${progress}%`)
+                },
+            })
+
+            if (result.success) {
+                handleChange(imageType, result.secure_url)
+                toast.success(`Tải ${getImageTypeLabel(imageType)} lên thành công`)
+            }
+        } catch (error) {
+            toast.error(`Lỗi khi tải ${getImageTypeLabel(imageType)} lên`)
+            console.error(`Error uploading ${imageType}:`, error)
+        } finally {
+            setUploadingStates((prev) => ({ ...prev, [imageType]: false }))
+        }
+    }
+
+    const handleRemoveImage = (imageType) => {
+        handleChange(imageType, "")
+        // Reset file input
+        const fileInput = document.getElementById(`${imageType}-upload`)
+        if (fileInput) {
+            fileInput.value = ""
+        }
+    }
+
+    const handlePaste = async (event, imageType) => {
+        const items = event.clipboardData?.items
+        if (!items) return
+
+        for (let item of items) {
+            if (item.type.startsWith('image/')) {
+                event.preventDefault()
+                const file = item.getAsFile()
+                if (file) {
+                    await handleImageUpload({ target: { files: [file] } }, imageType)
+                }
+                break
+            }
+        }
+    }
+
+    const handleDrop = async (event, imageType) => {
+        event.preventDefault()
+        setDragOver(null)
+
+        const files = event.dataTransfer?.files
+        if (files && files[0] && files[0].type.startsWith('image/')) {
+            await handleImageUpload({ target: { files: [files[0]] } }, imageType)
+        }
+    }
+
+    const handleDragOver = (event, imageType) => {
+        event.preventDefault()
+        setDragOver(imageType)
+    }
+
+    const handleDragLeave = (event) => {
+        event.preventDefault()
+        setDragOver(null)
+    }
+
+    const getImageTypeLabel = (imageType) => {
+        const labels = {
+            avatar: "avatar",
+            logo: "logo",
+            coverImage: "ảnh bìa",
+        }
+        return labels[imageType] || imageType
+    }
+
+    const renderImageUpload = (imageType, label, currentImage, className = "w-20 h-20") => {
+        const isUploading = uploadingStates[imageType]
+
+        return (
+            <div className="space-y-3">
+                <Label className="text-sm font-medium">{label}</Label>
+
+                {/* Paste Area */}
+                <div
+                    className={`relative border-2 border-dashed rounded-lg p-4 transition-colors ${dragOver === imageType
+                            ? 'border-pink-500 bg-pink-50'
+                            : 'border-gray-300 hover:border-pink-400'
+                        }`}
+                    onPaste={(e) => handlePaste(e, imageType)}
+                    onDrop={(e) => handleDrop(e, imageType)}
+                    onDragOver={(e) => handleDragOver(e, imageType)}
+                    onDragLeave={handleDragLeave}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            document.getElementById(`${imageType}-upload`)?.click()
+                        }
+                    }}
+                >
+                    {/* Image Preview */}
+                    <div className="flex flex-col items-center gap-3">
+                        {currentImage ? (
+                            <div className="relative group">
+                                {imageType === "avatar" ? (
+                                    <Avatar className={className}>
+                                        <AvatarImage src={currentImage || "/placeholder.svg"} />
+                                        <AvatarFallback className="bg-pink-100 text-pink-600">{formData.name?.[0] || "S"}</AvatarFallback>
+                                    </Avatar>
+                                ) : (
+                                    <img
+                                        src={currentImage || "/placeholder.svg"}
+                                        alt={label}
+                                        className={`${className} rounded-lg object-cover border-2 border-gray-200`}
+                                    />
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => handleRemoveImage(imageType)}
+                                    className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    disabled={isUploading}
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className={`${className} flex items-center justify-center bg-gray-50 rounded-lg`}>
+                                <ImageIcon className="w-8 h-8 text-gray-400" />
+                            </div>
+                        )}
+
+                        {/* Upload Instructions */}
+                        <div className="text-center">
+                            <p className="text-sm text-gray-600 mb-2">
+                                <strong>Ctrl+V</strong> để dán ảnh hoặc <strong>kéo thả</strong> ảnh vào đây
+                            </p>
+
+                            {/* Upload Button */}
+                            <div className="w-full">
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => handleImageUpload(e, imageType)}
+                                    className="hidden"
+                                    id={`${imageType}-upload`}
+                                    disabled={isUploading}
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full border-pink-200 hover:border-pink-400 hover:bg-pink-50"
+                                    disabled={isUploading}
+                                    onClick={() => {
+                                        const fileInput = document.getElementById(`${imageType}-upload`)
+                                        if (fileInput) {
+                                            fileInput.click()
+                                        }
+                                    }}
+                                >
+                                    {isUploading ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            Đang tải lên...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Upload className="w-4 h-4 mr-2" />
+                                            {currentImage ? "Thay đổi" : "Chọn ảnh"}
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* File Info */}
+                        <p className="text-xs text-gray-500 text-center">
+                            JPG, PNG, GIF (tối đa 5MB)
+                            <br />
+                            {imageType === "avatar" && "Khuyến nghị: 400x400px"}
+                            {imageType === "logo" && "Khuyến nghị: 200x200px"}
+                            {imageType === "coverImage" && "Khuyến nghị: 1200x400px"}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
     if (!shop) return null
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Save className="w-5 h-5 text-pink-600" />
@@ -153,41 +367,22 @@ export default function ShopEditModal({ shop, open, onOpenChange, onSuccess }) {
                         </div>
                     </div>
 
-                    {/* Images */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="avatar">Avatar URL</Label>
-                            <Input
-                                id="avatar"
-                                value={formData.avatar}
-                                onChange={(e) => handleChange("avatar", e.target.value)}
-                                placeholder="https://..."
-                                className="border-pink-200 focus:border-pink-400"
-                            />
-                        </div>
+                    {/* Image Uploads */}
+                    <Card className="border-pink-200">
+                        <CardContent className="p-4">
+                            <h4 className="font-semibold text-gray-900 mb-4">Hình ảnh shop</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                {/* Avatar Upload */}
+                                {renderImageUpload("avatar", "Avatar Shop", formData.avatar, "w-24 h-24")}
 
-                        <div className="space-y-2">
-                            <Label htmlFor="logo">Logo URL</Label>
-                            <Input
-                                id="logo"
-                                value={formData.logo}
-                                onChange={(e) => handleChange("logo", e.target.value)}
-                                placeholder="https://..."
-                                className="border-pink-200 focus:border-pink-400"
-                            />
-                        </div>
+                                {/* Logo Upload */}
+                                {renderImageUpload("logo", "Logo Shop", formData.logo, "w-20 h-20")}
 
-                        <div className="space-y-2">
-                            <Label htmlFor="coverImage">Cover Image URL</Label>
-                            <Input
-                                id="coverImage"
-                                value={formData.coverImage}
-                                onChange={(e) => handleChange("coverImage", e.target.value)}
-                                placeholder="https://..."
-                                className="border-pink-200 focus:border-pink-400"
-                            />
-                        </div>
-                    </div>
+                                {/* Cover Image Upload */}
+                                {renderImageUpload("coverImage", "Ảnh bìa", formData.coverImage, "w-32 h-20")}
+                            </div>
+                        </CardContent>
+                    </Card>
 
                     {/* Contact Information */}
                     <Card className="border-pink-200">
@@ -269,7 +464,11 @@ export default function ShopEditModal({ shop, open, onOpenChange, onSuccess }) {
                         <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
                             Hủy
                         </Button>
-                        <Button type="submit" disabled={loading} className="bg-pink-600 hover:bg-pink-700">
+                        <Button
+                            type="submit"
+                            disabled={loading || Object.values(uploadingStates).some((state) => state)}
+                            className="bg-pink-600 hover:bg-pink-700"
+                        >
                             {loading ? "Đang lưu..." : "Lưu thay đổi"}
                         </Button>
                     </div>

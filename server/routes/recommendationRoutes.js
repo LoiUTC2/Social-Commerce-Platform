@@ -19,7 +19,11 @@ const {
     getFlashSaleRecommendations,
 
     debugGetCollaborativeRecommendations,
-    debugGetHybridRecommendations
+    debugGetHybridRecommendations,
+
+    clearModelCache,
+    clearMFModelCache,
+    clearAllModelCache,
 } = require('../services/recommendationService');
 
 const { verifyToken, setActor } = require('../middleware/authMiddleware');
@@ -434,6 +438,7 @@ router.get('/products', requestLogger, setActor, async (req, res) => {
     }
 });
 
+///Cái cũ, chưa dùng
 // Route mới để lấy gợi ý Flash Sale (trong này có trả về sản phẩm gợi ý theo hành vi và độ hot)
 router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res) => {
     try {
@@ -603,7 +608,8 @@ router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res)
                             .select('name description products startTime endTime stats')
                             .populate({
                                 path: 'products.product',
-                                select: 'name mainCategory price hashtags images'
+                                select: 'name slug mainCategory price hashtags images stock soldCount',
+    
                             })
                             .sort(sortConditions)
                             .skip(offset)
@@ -631,11 +637,11 @@ router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res)
                         switch (sortBy) {
                             case 'endTime':
                             case 'newest':
-                                return sortOrder === 'asc' 
+                                return sortOrder === 'asc'
                                     ? new Date(a.createdAt) - new Date(b.createdAt)
                                     : new Date(b.createdAt) - new Date(a.createdAt);
                             case 'totalPurchases':
-                                return sortOrder === 'asc' 
+                                return sortOrder === 'asc'
                                     ? (a.soldCount || 0) - (b.soldCount || 0)
                                     : (b.soldCount || 0) - (a.soldCount || 0);
                             default:
@@ -657,7 +663,8 @@ router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res)
                         .select('name description products startTime endTime stats')
                         .populate({
                             path: 'products.product',
-                            select: 'name mainCategory price hashtags images'
+                            select: 'name slug mainCategory price hashtags images stock soldCount',
+                
                         })
                         .sort({
                             'stats.totalPurchases': -1,
@@ -784,7 +791,8 @@ router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res)
                     .select('name description hashtags products startTime endTime stats')
                     .populate({
                         path: 'products.product',
-                        select: 'name mainCategory price hashtags images'
+                        select: 'name slug mainCategory price hashtags images stock soldCount',
+                        
                     })
                     .sort({
                         'stats.totalPurchases': -1,
@@ -800,7 +808,7 @@ router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res)
             const flashSaleResults = fallbackFlashSales.map(fs => ({ ...fs, type: 'flashsale' }));
 
             // Extract products
-            const productResults = fallbackFlashSales.flatMap(fs => 
+            const productResults = fallbackFlashSales.flatMap(fs =>
                 (fs.products || []).map(p => ({
                     ...p.product,
                     type: 'product',
@@ -910,6 +918,816 @@ router.get('/flashsales', requestLogger, verifyToken, setActor, async (req, res)
         }
     }
 });
+
+//Cái mới/////
+// Route mới để lấy gợi ý Flash Sale (đã cập nhật để tận dụng AI system mới)
+router.get('/flashsales_1', requestLogger, verifyToken, setActor, async (req, res) => {
+    try {
+        const {
+            limit = 10,
+            page = 1,
+            search = '',
+            sortBy = 'recommended', // recommended, endTime, totalPurchases, newest, aiScore
+            sortOrder = 'desc',
+            priceRange = '', // "min-max" format
+            category = '',
+            hasFlashSale = '', // true/false filter
+            timeFilter = '' // expiring_soon, new, all
+        } = req.query;
+
+        const userId = req.actor?._id?.toString();
+        const sessionId = req.sessionId;
+        const role = req.actor?.type || 'user';
+
+        // Validate pagination parameters
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(50, Math.max(1, parseInt(limit))); // Giới hạn 1-50
+        const offset = (pageNum - 1) * limitNum;
+
+        console.log(`🔍 Debug flashsales endpoint - userId: ${userId}, sessionId: ${sessionId}, role: ${role}, page: ${pageNum}, limit: ${limitNum}`);
+
+        if (!userId && !sessionId) {
+            return errorResponse(res, 'Cần userId hoặc sessionId', 400);
+        }
+
+        // Build enhanced cache key với thêm filters
+        const cacheKey = `flashsales:v2:${userId || sessionId}:${pageNum}:${limitNum}:${search}:${sortBy}:${sortOrder}:${role}:${priceRange}:${category}:${hasFlashSale}:${timeFilter}`;
+
+        // Kiểm tra cache
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            console.log('✅ Sử dụng cached flashsales result');
+            return successResponse(res, 'Lấy gợi ý Flash Sale thành công (cached)', JSON.parse(cached));
+        }
+
+        // Giảm timeout xuống 20 giây
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Request timeout after 20 seconds')), 20000);
+        });
+
+        // Gọi recommendation với enhanced error handling
+        const recommendationPromise = (async () => {
+            try {
+                console.log('🚀 Bắt đầu lấy AI-powered flash sale recommendations...');
+
+                let allFlashSales = [];
+                let allProducts = [];
+                let isRecommendationBased = false;
+
+                // Nếu không có search/filter phức tạp, sử dụng AI recommendation
+                if (!search && sortBy === 'recommended') {
+                    // Kiểm tra cache recommendations trước
+                    const recCacheKey = `recs:flashsale:v2:${userId || sessionId}:${limitNum * 5}:${role}`;
+                    const cachedRecs = await redisClient.get(recCacheKey);
+
+                    if (cachedRecs) {
+                        console.log('✅ Sử dụng cached AI flash sale recommendations');
+                        const cachedResult = JSON.parse(cachedRecs);
+                        allFlashSales = cachedResult.flashSales || [];
+                        allProducts = cachedResult.products || [];
+                        isRecommendationBased = true;
+                    } else {
+                        // Thực hiện AI recommendation với timeout nhỏ hơn
+                        const recTimeout = new Promise((_, reject) => {
+                            setTimeout(() => reject(new Error('AI Recommendation timeout')), 18000);
+                        });
+
+                        const recPromise = getFlashSaleRecommendations(
+                            userId,
+                            sessionId,
+                            limitNum * 5, // Lấy nhiều hơn để có đủ dữ liệu sau khi filter
+                            role
+                        );
+
+                        try {
+                            const result = await Promise.race([recPromise, recTimeout]);
+                            allFlashSales = result.flashSales || [];
+                            allProducts = result.products || [];
+                            isRecommendationBased = true;
+
+                            // Cache result với thời gian ngắn hơn vì có AI score
+                            await redisClient.setex(recCacheKey, 300, JSON.stringify(result)); // 5 phút
+                        } catch (recError) {
+                            console.warn('⚠️ AI Recommendation failed, fallback to enhanced query-based');
+                            allFlashSales = [];
+                            allProducts = [];
+                            isRecommendationBased = false;
+                        }
+                    }
+                }
+
+                console.log(`📊 AI Results - Flash sales: ${allFlashSales.length}, Products: ${allProducts.length}`);
+
+                let flashSaleResults = [];
+                let productResults = [];
+                let totalFlashSales = 0;
+                let totalProducts = 0;
+
+                if (isRecommendationBased && allFlashSales.length > 0) {
+                    // Apply enhanced filters
+                    let filteredFlashSales = allFlashSales;
+                    let filteredProducts = allProducts;
+
+                    // Search filter
+                    if (search) {
+                        const searchRegex = new RegExp(search, 'i');
+                        filteredFlashSales = filteredFlashSales.filter(fs =>
+                            searchRegex.test(fs.name) ||
+                            searchRegex.test(fs.description || '')
+                        );
+                        filteredProducts = filteredProducts.filter(p =>
+                            searchRegex.test(p.name) ||
+                            searchRegex.test(p.description || '') ||
+                            searchRegex.test(p.flashSaleName || '')
+                        );
+                    }
+
+                    // Price range filter cho products
+                    if (priceRange && filteredProducts.length > 0) {
+                        const [minPrice, maxPrice] = priceRange.split('-').map(p => parseFloat(p));
+                        if (!isNaN(minPrice) && !isNaN(maxPrice)) {
+                            filteredProducts = filteredProducts.filter(p => {
+                                const price = p.pricing?.finalPrice || p.salePrice || p.price;
+                                return price >= minPrice && price <= maxPrice;
+                            });
+                        }
+                    }
+
+                    // Category filter cho products
+                    if (category && filteredProducts.length > 0) {
+                        filteredProducts = filteredProducts.filter(p =>
+                            p.mainCategory?.toString() === category
+                        );
+                    }
+
+                    // Flash sale status filter cho products
+                    if (hasFlashSale !== '') {
+                        const wantFlashSale = hasFlashSale === 'true';
+                        filteredProducts = filteredProducts.filter(p =>
+                            wantFlashSale ? p.pricing?.isInFlashSale : !p.pricing?.isInFlashSale
+                        );
+                    }
+
+                    // Time filter cho flash sales
+                    if (timeFilter && filteredFlashSales.length > 0) {
+                        const now = new Date();
+                        filteredFlashSales = filteredFlashSales.filter(fs => {
+                            const hoursLeft = fs.hoursLeft || ((new Date(fs.endTime) - now) / (1000 * 60 * 60));
+
+                            switch (timeFilter) {
+                                case 'expiring_soon':
+                                    return hoursLeft <= 24;
+                                case 'new':
+                                    const hoursFromStart = (now - new Date(fs.startTime)) / (1000 * 60 * 60);
+                                    return hoursFromStart <= 24;
+                                default:
+                                    return true;
+                            }
+                        });
+                    }
+
+                    // Enhanced sorting với AI score
+                    if (sortBy === 'aiScore' && isRecommendationBased) {
+                        filteredFlashSales.sort((a, b) =>
+                            sortOrder === 'asc' ? (a.aiScore || 0) - (b.aiScore || 0) : (b.aiScore || 0) - (a.aiScore || 0)
+                        );
+                        filteredProducts.sort((a, b) =>
+                            sortOrder === 'asc' ? (a.aiScore || 0) - (b.aiScore || 0) : (b.aiScore || 0) - (a.aiScore || 0)
+                        );
+                    }
+
+                    totalFlashSales = filteredFlashSales.length;
+                    totalProducts = filteredProducts.length;
+
+                    // Pagination
+                    flashSaleResults = filteredFlashSales.slice(offset, offset + limitNum);
+                    productResults = filteredProducts.slice(offset, offset + limitNum);
+
+                    // Enhance products với virtual field pricing
+                    productResults = await Promise.all(productResults.map(async (product) => {
+                        try {
+                            // Đảm bảo có đầy đủ thông tin pricing từ AI system
+                            const enhancedProduct = {
+                                ...product,
+                                // Frontend-friendly pricing info
+                                displayPrice: {
+                                    original: product.pricing?.originalPrice || product.price,
+                                    final: product.pricing?.finalPrice || product.salePrice || product.price,
+                                    discount: product.pricing?.discountInfo?.percentage || 0,
+                                    savings: (product.pricing?.originalPrice || product.price) - (product.pricing?.finalPrice || product.salePrice || product.price)
+                                },
+                                // Flash sale specific info
+                                flashSale: {
+                                    isActive: product.pricing?.isInFlashSale || false,
+                                    id: product.flashSaleId,
+                                    name: product.flashSaleName,
+                                    timeLeft: product.hoursLeft,
+                                    stockLeft: (product.stockLimit || 0) - (product.soldCount || 0),
+                                    progress: product.stockLimit ? ((product.soldCount || 0) / product.stockLimit) * 100 : 0
+                                },
+                                // AI scoring info
+                                ai: {
+                                    score: product.aiScore || 0,
+                                    isRecommended: isRecommendationBased,
+                                    confidence: product.similarity || 0
+                                }
+                            };
+
+                            return enhancedProduct;
+                        } catch (enhanceError) {
+                            console.warn('⚠️ Error enhancing product:', enhanceError.message);
+                            return product;
+                        }
+                    }));
+
+                } else {
+                    // Enhanced fallback: Query database với AI-inspired sorting
+                    console.log('🔄 Enhanced fallback to database query...');
+
+                    // Build enhanced query conditions
+                    const flashSaleConditions = {
+                        isActive: true,
+                        approvalStatus: 'approved',
+                        endTime: { $gt: new Date() }
+                    };
+
+                    // Search conditions
+                    if (search) {
+                        flashSaleConditions.$or = [
+                            { name: { $regex: search, $options: 'i' } },
+                            { description: { $regex: search, $options: 'i' } }
+                        ];
+                    }
+
+                    // Time filter
+                    if (timeFilter === 'expiring_soon') {
+                        const next24Hours = new Date(Date.now() + 24 * 60 * 60 * 1000);
+                        flashSaleConditions.endTime = { $gt: new Date(), $lte: next24Hours };
+                    } else if (timeFilter === 'new') {
+                        const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                        flashSaleConditions.startTime = { $gte: last24Hours };
+                    }
+
+                    // Enhanced sort conditions
+                    let sortConditions = {};
+                    switch (sortBy) {
+                        case 'endTime':
+                            sortConditions = { endTime: sortOrder === 'asc' ? 1 : -1 };
+                            break;
+                        case 'totalPurchases':
+                            sortConditions = { 'stats.totalPurchases': sortOrder === 'asc' ? 1 : -1 };
+                            break;
+                        case 'newest':
+                            sortConditions = { createdAt: sortOrder === 'asc' ? 1 : -1 };
+                            break;
+                        case 'aiScore':
+                        default: // recommended or fallback
+                            // AI-inspired sorting algorithm
+                            sortConditions = {
+                                'stats.totalPurchases': -1,
+                                'stats.totalViews': -1,
+                                endTime: 1, // Sắp hết hạn lên trước
+                                createdAt: -1
+                            };
+                    }
+
+                    // Get enhanced flash sales data
+                    const [flashSales, flashSaleCount] = await Promise.all([
+                        FlashSale.find(flashSaleConditions)
+                            .select('name description products startTime endTime stats hashtags')
+                            .populate({
+                                path: 'products.product',
+                                select: 'name mainCategory price hashtags images currentFlashSale',
+                                populate: {
+                                    path: 'currentFlashSale.flashSaleId',
+                                    select: 'name'
+                                }
+                            })
+                            .sort(sortConditions)
+                            .skip(offset)
+                            .limit(limitNum)
+                            .lean(),
+                        FlashSale.countDocuments(flashSaleConditions)
+                    ]);
+
+                    // Enhanced flash sale results với AI-style metadata
+                    flashSaleResults = await Promise.all(flashSales.map(async (fs) => {
+                        const now = new Date();
+                        const hoursLeft = (new Date(fs.endTime) - now) / (1000 * 60 * 60);
+
+                        return {
+                            ...fs,
+                            type: 'flashsale',
+                            hoursLeft: Math.max(0, hoursLeft),
+                            // AI-style scoring cho fallback
+                            aiScore: (fs.stats?.totalPurchases || 0) * 2 + (fs.stats?.totalViews || 0) * 0.1,
+                            urgency: hoursLeft <= 6 ? 'high' : hoursLeft <= 24 ? 'medium' : 'low'
+                        };
+                    }));
+
+                    totalFlashSales = flashSaleCount;
+
+                    // Enhanced product extraction với virtual fields
+                    const allProductsFromFS = [];
+                    for (const fs of flashSales) {
+                        if (fs.products) {
+                            for (const item of fs.products) {
+                                if (item.product) {
+                                    // Sử dụng virtual fields cho pricing chính xác
+                                    const productDoc = new Product(item.product);
+
+                                    const enhancedProduct = {
+                                        ...item.product,
+                                        type: 'product',
+                                        flashSaleId: fs._id,
+                                        flashSaleName: fs.name,
+                                        salePrice: item.salePrice,
+                                        stockLimit: item.stockLimit,
+                                        soldCount: item.soldCount || 0,
+                                        hoursLeft: Math.max(0, (new Date(fs.endTime) - new Date()) / (1000 * 60 * 60)),
+                                        // Enhanced pricing info
+                                        displayPrice: {
+                                            original: item.product.price,
+                                            final: productDoc.finalPrice,
+                                            discount: productDoc.discountInfo?.percentage || 0,
+                                            savings: item.product.price - productDoc.finalPrice
+                                        },
+                                        flashSale: {
+                                            isActive: productDoc.isInFlashSale,
+                                            id: fs._id,
+                                            name: fs.name,
+                                            stockLeft: (item.stockLimit || 0) - (item.soldCount || 0),
+                                            progress: item.stockLimit ? ((item.soldCount || 0) / item.stockLimit) * 100 : 0
+                                        }
+                                    };
+
+                                    // Apply filters
+                                    let includeProduct = true;
+
+                                    // Price filter
+                                    if (priceRange) {
+                                        const [minPrice, maxPrice] = priceRange.split('-').map(p => parseFloat(p));
+                                        if (!isNaN(minPrice) && !isNaN(maxPrice)) {
+                                            const price = enhancedProduct.displayPrice.final;
+                                            includeProduct = price >= minPrice && price <= maxPrice;
+                                        }
+                                    }
+
+                                    // Category filter
+                                    if (category && includeProduct) {
+                                        includeProduct = item.product.mainCategory?.toString() === category;
+                                    }
+
+                                    // Flash sale filter
+                                    if (hasFlashSale !== '' && includeProduct) {
+                                        const wantFlashSale = hasFlashSale === 'true';
+                                        includeProduct = wantFlashSale ? enhancedProduct.flashSale.isActive : !enhancedProduct.flashSale.isActive;
+                                    }
+
+                                    if (includeProduct) {
+                                        allProductsFromFS.push(enhancedProduct);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Enhanced product sorting
+                    const sortedProducts = allProductsFromFS.sort((a, b) => {
+                        switch (sortBy) {
+                            case 'endTime':
+                                return sortOrder === 'asc'
+                                    ? a.hoursLeft - b.hoursLeft
+                                    : b.hoursLeft - a.hoursLeft;
+                            case 'newest':
+                                return sortOrder === 'asc'
+                                    ? new Date(a.createdAt) - new Date(b.createdAt)
+                                    : new Date(b.createdAt) - new Date(a.createdAt);
+                            case 'totalPurchases':
+                                return sortOrder === 'asc'
+                                    ? (a.soldCount || 0) - (b.soldCount || 0)
+                                    : (b.soldCount || 0) - (a.soldCount || 0);
+                            default:
+                                // AI-inspired default sorting
+                                const scoreA = (a.soldCount || 0) * 2 + (a.hoursLeft <= 24 ? 50 : 0) + (a.displayPrice.discount || 0);
+                                const scoreB = (b.soldCount || 0) * 2 + (b.hoursLeft <= 24 ? 50 : 0) + (b.displayPrice.discount || 0);
+                                return scoreB - scoreA;
+                        }
+                    });
+
+                    productResults = sortedProducts.slice(offset, offset + limitNum);
+                    totalProducts = sortedProducts.length;
+                }
+
+                // Enhanced final fallback nếu không có kết quả
+                if (flashSaleResults.length === 0 && productResults.length === 0 && pageNum === 1) {
+                    console.log('⚠️ Không có kết quả, thử enhanced fallback...');
+
+                    const emergencyFlashSales = await FlashSale.find({
+                        isActive: true,
+                        endTime: { $gt: new Date() }
+                    })
+                        .select('name description products startTime endTime stats')
+                        .populate({
+                            path: 'products.product',
+                            select: 'name mainCategory price hashtags images currentFlashSale stock soldCount',
+                            populate: {
+                                path: 'currentFlashSale.flashSaleId',
+                                select: 'name description startTime endTime'
+                            }
+                        })
+                        .sort({
+                            'stats.totalPurchases': -1,
+                            'stats.totalViews': -1,
+                            endTime: 1
+                        })
+                        .limit(limitNum)
+                        .lean();
+
+                    flashSaleResults = emergencyFlashSales.map(fs => ({
+                        ...fs,
+                        type: 'flashsale',
+                        hoursLeft: Math.max(0, (new Date(fs.endTime) - new Date()) / (1000 * 60 * 60)),
+                        aiScore: (fs.stats?.totalPurchases || 0) * 2
+                    }));
+
+                    totalFlashSales = emergencyFlashSales.length;
+
+                    // Emergency products với enhanced info
+                    const emergencyProducts = [];
+                    for (const fs of emergencyFlashSales) {
+                        if (fs.products) {
+                            for (const item of fs.products) {
+                                if (item.product) {
+                                    const productDoc = new Product(item.product);
+                                    emergencyProducts.push({
+                                        ...item.product,
+                                        type: 'product',
+                                        flashSaleId: fs._id,
+                                        flashSaleName: fs.name,
+                                        salePrice: item.salePrice,
+                                        displayPrice: {
+                                            original: item.product.price,
+                                            final: productDoc.finalPrice,
+                                            discount: productDoc.discountInfo?.percentage || 0,
+                                            savings: item.product.price - productDoc.finalPrice
+                                        },
+                                        flashSale: {
+                                            isActive: productDoc.isInFlashSale,
+                                            id: fs._id,
+                                            name: fs.name
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    productResults = emergencyProducts.slice(0, limitNum);
+                    totalProducts = emergencyProducts.length;
+                }
+
+                // Enhanced pagination metadata
+                const totalFlashSalePages = Math.ceil(totalFlashSales / limitNum);
+                const hasNextFlashSale = pageNum < totalFlashSalePages;
+                const hasPrevFlashSale = pageNum > 1;
+
+                const totalProductPages = Math.ceil(totalProducts / limitNum);
+                const hasNextProduct = pageNum < totalProductPages;
+                const hasPrevProduct = pageNum > 1;
+
+                // Enhanced response structure
+                const result = {
+                    flashSales: flashSaleResults,
+                    products: productResults,
+                    pagination: {
+                        flashSales: {
+                            currentPage: pageNum,
+                            totalPages: totalFlashSalePages,
+                            totalCount: totalFlashSales,
+                            limit: limitNum,
+                            hasNext: hasNextFlashSale,
+                            hasPrev: hasPrevFlashSale,
+                            nextPage: hasNextFlashSale ? pageNum + 1 : null,
+                            prevPage: hasPrevFlashSale ? pageNum - 1 : null
+                        },
+                        products: {
+                            currentPage: pageNum,
+                            totalPages: totalProductPages,
+                            totalCount: totalProducts,
+                            limit: limitNum,
+                            hasNext: hasNextProduct,
+                            hasPrev: hasPrevProduct,
+                            nextPage: hasNextProduct ? pageNum + 1 : null,
+                            prevPage: hasPrevProduct ? pageNum - 1 : null
+                        }
+                    },
+                    filters: {
+                        search: search || null,
+                        sortBy,
+                        sortOrder,
+                        priceRange: priceRange || null,
+                        category: category || null,
+                        hasFlashSale: hasFlashSale || null,
+                        timeFilter: timeFilter || null
+                    },
+                    count: {
+                        flashSales: flashSaleResults.length,
+                        products: productResults.length
+                    },
+                    metadata: {
+                        isRecommendationBased,
+                        aiEnabled: true,
+                        version: '2.0',
+                        enhancedPricing: true,
+                        virtualFields: true,
+                        reason: isRecommendationBased ? 'AI-powered recommendations' : 'Enhanced query-based results',
+                        timestamp: new Date().toISOString(),
+                        processingTime: Date.now() - startTime
+                    },
+                    // Thông tin bổ sung cho frontend
+                    summary: {
+                        totalActiveFlashSales: totalFlashSales,
+                        totalProductsInFlashSales: totalProducts,
+                        hasRecommendations: isRecommendationBased,
+                        averageDiscount: productResults.length > 0
+                            ? productResults.reduce((sum, p) => sum + (p.displayPrice?.discount || 0), 0) / productResults.length
+                            : 0,
+                        expiringSoonCount: flashSaleResults.filter(fs => fs.hoursLeft <= 24).length
+                    }
+                };
+
+                const startTime = Date.now();
+                console.log(`✅ Enhanced trả về ${flashSaleResults.length}/${totalFlashSales} flash sales và ${productResults.length}/${totalProducts} products cho page ${pageNum}`);
+                return result;
+
+            } catch (recError) {
+                console.error('❌ Lỗi trong enhanced recommendation process:', recError);
+                throw recError;
+            }
+        })();
+
+        // Race between recommendation và timeout
+        const result = await Promise.race([recommendationPromise, timeoutPromise]);
+
+        // Cache kết quả trong 5 phút (ngắn hơn vì có AI score)
+        await redisClient.setex(cacheKey, 300, JSON.stringify(result));
+
+        return successResponse(res, 'Lấy gợi ý Flash Sale thành công', result);
+
+    } catch (err) {
+        console.error('❌ API Error:', err);
+
+        // Enhanced fallback cho mọi loại lỗi
+        console.log('🔄 Enhanced fallback to simple flash sale recommendations...');
+
+        try {
+            const pageNum = Math.max(1, parseInt(req.query.page) || 1);
+            const limitNum = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+            const offset = (pageNum - 1) * limitNum;
+
+            // Enhanced fallback query conditions
+            const queryConditions = {
+                isActive: true,
+                endTime: { $gt: new Date() }
+            };
+
+            if (req.query.search) {
+                queryConditions.$or = [
+                    { name: { $regex: req.query.search, $options: 'i' } },
+                    { description: { $regex: req.query.search, $options: 'i' } }
+                ];
+            }
+
+            const [fallbackFlashSales, totalCount] = await Promise.all([
+                FlashSale.find(queryConditions)
+                    .select('name description hashtags products startTime endTime stats')
+                    .populate({
+                        path: 'products.product',
+                        select: 'name mainCategory price hashtags images currentFlashSale stock soldCount',
+                        populate: {
+                            path: 'currentFlashSale.flashSaleId',
+                            select: 'name description startTime endTime'
+                        }
+                    })
+                    .sort({
+                        'stats.totalPurchases': -1,
+                        'stats.totalRevenue': -1,
+                        endTime: 1
+                    })
+                    .skip(offset)
+                    .limit(limitNum)
+                    .lean(),
+                FlashSale.countDocuments(queryConditions)
+            ]);
+
+            // Enhanced fallback results
+            const flashSaleResults = fallbackFlashSales.map(fs => ({
+                ...fs,
+                type: 'flashsale',
+                hoursLeft: Math.max(0, (new Date(fs.endTime) - new Date()) / (1000 * 60 * 60)),
+                aiScore: (fs.stats?.totalPurchases || 0) * 2
+            }));
+
+            // Enhanced fallback products
+            const productResults = [];
+            for (const fs of fallbackFlashSales) {
+                if (fs.products) {
+                    for (const item of fs.products) {
+                        if (item.product) {
+                            const productDoc = new Product(item.product);
+                            productResults.push({
+                                ...item.product,
+                                type: 'product',
+                                flashSaleId: fs._id,
+                                flashSaleName: fs.name,
+                                salePrice: item.salePrice,
+                                soldCount: item.soldCount || 0,
+                                displayPrice: {
+                                    original: item.product.price,
+                                    final: productDoc.finalPrice,
+                                    discount: productDoc.discountInfo?.percentage || 0,
+                                    savings: item.product.price - productDoc.finalPrice
+                                },
+                                flashSale: {
+                                    isActive: productDoc.isInFlashSale,
+                                    id: fs._id,
+                                    name: fs.name
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
+            const limitedProducts = productResults.slice(0, limitNum);
+            const totalPages = Math.ceil(totalCount / limitNum);
+            const hasNext = pageNum < totalPages;
+            const hasPrev = pageNum > 1;
+
+            const fallbackResult = {
+                flashSales: flashSaleResults,
+                products: limitedProducts,
+                pagination: {
+                    flashSales: {
+                        currentPage: pageNum,
+                        totalPages,
+                        totalCount,
+                        limit: limitNum,
+                        hasNext,
+                        hasPrev,
+                        nextPage: hasNext ? pageNum + 1 : null,
+                        prevPage: hasPrev ? pageNum - 1 : null
+                    },
+                    products: {
+                        currentPage: pageNum,
+                        totalPages: Math.ceil(limitedProducts.length / limitNum),
+                        totalCount: limitedProducts.length,
+                        limit: limitNum,
+                        hasNext: false,
+                        hasPrev: false,
+                        nextPage: null,
+                        prevPage: null
+                    }
+                },
+                filters: {
+                    search: req.query.search || null,
+                    sortBy: req.query.sortBy || 'recommended',
+                    sortOrder: req.query.sortOrder || 'desc',
+                    priceRange: req.query.priceRange || null,
+                    category: req.query.category || null,
+                    hasFlashSale: req.query.hasFlashSale || null,
+                    timeFilter: req.query.timeFilter || null
+                },
+                count: {
+                    flashSales: flashSaleResults.length,
+                    products: limitedProducts.length
+                },
+                metadata: {
+                    isRecommendationBased: false,
+                    aiEnabled: false,
+                    version: '2.0',
+                    enhancedPricing: true,
+                    virtualFields: true,
+                    reason: err.message.includes('timeout') ? 'Timeout fallback' : 'Error fallback',
+                    timestamp: new Date().toISOString(),
+                    processingTime: Date.now() - Date.now() // Will be 0 but structure consistent
+                },
+                summary: {
+                    totalActiveFlashSales: totalCount,
+                    totalProductsInFlashSales: limitedProducts.length,
+                    hasRecommendations: false,
+                    averageDiscount: limitedProducts.length > 0
+                        ? limitedProducts.reduce((sum, p) => sum + (p.displayPrice?.discount || 0), 0) / limitedProducts.length
+                        : 0,
+                    expiringSoonCount: flashSaleResults.filter(fs => fs.hoursLeft <= 24).length,
+                    highDiscountCount: limitedProducts.filter(p => (p.displayPrice?.discount || 0) >= 30).length,
+                    newFlashSalesCount: flashSaleResults.filter(fs => {
+                        const hoursFromStart = (new Date() - new Date(fs.createdAt)) / (1000 * 60 * 60);
+                        return hoursFromStart <= 24;
+                    }).length
+                },
+                // Thông tin bổ sung cho frontend debugging
+                debug: {
+                    fallbackReason: err.message.includes('timeout') ? 'AI_TIMEOUT' : 'AI_ERROR',
+                    originalError: err.message,
+                    queryFilters: {
+                        hasSearch: !!req.query.search,
+                        hasFilters: !!(req.query.priceRange || req.query.category || req.query.hasFlashSale || req.query.timeFilter),
+                        sortMethod: req.query.sortBy || 'recommended'
+                    },
+                    performanceHints: {
+                        shouldRetry: err.message.includes('timeout'),
+                        cacheStatus: 'fallback_used',
+                        recommendUseFilters: flashSaleResults.length === 0
+                    }
+                }
+            };
+
+            // Cache fallback result với thời gian ngắn hơn (2 phút)
+            try {
+                const fallbackCacheKey = `flashsales:fallback:v2:${userId || sessionId}:${pageNum}:${limitNum}:${req.query.search || ''}`;
+                await redisClient.setex(fallbackCacheKey, 120, JSON.stringify(fallbackResult));
+            } catch (cacheError) {
+                console.warn('⚠️ Không thể cache fallback result:', cacheError.message);
+            }
+
+            console.log(`✅ Enhanced fallback trả về ${flashSaleResults.length} flash sales và ${limitedProducts.length} products`);
+            return successResponse(res, 'Lấy gợi ý Flash Sale thành công (fallback)', fallbackResult);
+
+        } catch (fallbackError) {
+            console.error('❌ Enhanced fallback cũng thất bại:', fallbackError);
+
+            // Ultimate fallback - trả về structure cơ bản
+            const ultimateFallback = {
+                flashSales: [],
+                products: [],
+                pagination: {
+                    flashSales: {
+                        currentPage: parseInt(req.query.page) || 1,
+                        totalPages: 0,
+                        totalCount: 0,
+                        limit: parseInt(req.query.limit) || 10,
+                        hasNext: false,
+                        hasPrev: false,
+                        nextPage: null,
+                        prevPage: null
+                    },
+                    products: {
+                        currentPage: parseInt(req.query.page) || 1,
+                        totalPages: 0,
+                        totalCount: 0,
+                        limit: parseInt(req.query.limit) || 10,
+                        hasNext: false,
+                        hasPrev: false,
+                        nextPage: null,
+                        prevPage: null
+                    }
+                },
+                filters: {
+                    search: req.query.search || null,
+                    sortBy: req.query.sortBy || 'recommended',
+                    sortOrder: req.query.sortOrder || 'desc',
+                    priceRange: req.query.priceRange || null,
+                    category: req.query.category || null,
+                    hasFlashSale: req.query.hasFlashSale || null,
+                    timeFilter: req.query.timeFilter || null
+                },
+                count: {
+                    flashSales: 0,
+                    products: 0
+                },
+                metadata: {
+                    isRecommendationBased: false,
+                    aiEnabled: false,
+                    version: '2.0',
+                    enhancedPricing: false,
+                    virtualFields: false,
+                    reason: 'Ultimate fallback - system error',
+                    timestamp: new Date().toISOString(),
+                    processingTime: 0
+                },
+                summary: {
+                    totalActiveFlashSales: 0,
+                    totalProductsInFlashSales: 0,
+                    hasRecommendations: false,
+                    averageDiscount: 0,
+                    expiringSoonCount: 0,
+                    highDiscountCount: 0,
+                    newFlashSalesCount: 0
+                },
+                error: {
+                    code: 'SYSTEM_ERROR',
+                    message: 'Hệ thống tạm thời gặp sự cố, vui lòng thử lại sau',
+                    details: process.env.NODE_ENV === 'development' ? fallbackError.message : null,
+                    suggestion: 'Thử lại với bộ lọc đơn giản hơn hoặc không có từ khóa tìm kiếm'
+                }
+            };
+
+            return errorResponse(res, 'Hệ thống gặp sự cố', 500, ultimateFallback);
+        }
+    }
+})
 
 // Route lấy gợi ý cửa hàng/shop với pagination và filter
 router.get('/shops', requestLogger, verifyToken, setActor, async (req, res) => {
@@ -1366,7 +2184,7 @@ router.get('/users', requestLogger, verifyToken, setActor, async (req, res) => {
                             isActive: true,
                             _id: { $ne: userId }
                         })
-                            .select('fullName avatar bio createdAt')
+                            .select('fullName avatar coverImage bio slug createdAt')
                             .sort({ createdAt: -1 })
                             .limit(fetchLimit)
                             .lean();
@@ -1495,7 +2313,7 @@ router.get('/users', requestLogger, verifyToken, setActor, async (req, res) => {
                 isActive: true,
                 _id: { $ne: req.query.userId }
             })
-                .select('fullName avatar bio createdAt')
+                .select('fullName avatar slug bio createdAt')
                 .sort({ [sortField]: sortDirection })
                 .skip(offsetNum)
                 .limit(limitNum)
@@ -1988,5 +2806,48 @@ router.get('/debug/products', setActor, async (req, res) => {
         );
     }
 });
+
+// API để clear model cache (userEmbedding, entityEmbedding)
+router.post('/clear-model', (req, res) => {
+    try {
+        clearModelCache();
+        return successResponse(res, 'Model cache cleared successfully', {
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('❌ Error clearing model cache:', error);
+        return errorResponse(res, 'Failed to clear model cache', 500, error.message);
+    }
+});
+
+// API để clear MF model cache
+router.post('/clear-mf-model', (req, res) => {
+    try {
+        clearMFModelCache();
+        return successResponse(res, 'MF Model cache cleared successfully', {
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('❌ Error clearing MF model cache:', error);
+        return errorResponse(res, 'Failed to clear MF model cache', 500, error.message);
+    }
+});
+
+// API để clear tất cả cache
+router.post('/clear-all', (req, res) => {
+    try {
+        clearAllModelCache();
+        return successResponse(res, 'All model caches cleared successfully', {
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('❌ Error clearing all caches:', error);
+        return errorResponse(res, 'Failed to clear all caches', 500, error.message);
+    }
+});
+
+// Xóa cache Redis
+// redis-cli DEL mf_model
+// redis-cli flushall
 
 module.exports = router;

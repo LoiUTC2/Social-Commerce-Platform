@@ -7,8 +7,12 @@ import { Button } from "../../ui/button"
 import { Heart, ShoppingCart, Eye, Sparkles, Zap } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
+import { useCart } from "../../../contexts/CartContext"
+import { toast } from "sonner"
+
 const RecommendedProductCard = ({ product }) => {
     const navigate = useNavigate()
+    const { addItemToCart, loading: cartLoading } = useCart()
     const [isHovered, setIsHovered] = useState(false)
     const [isLiked, setIsLiked] = useState(false)
 
@@ -35,6 +39,20 @@ const RecommendedProductCard = ({ product }) => {
 
     const handleProductClick = () => {
         navigate(`/marketplace/products/${product.slug}`)
+    }
+
+    // Hàm xử lý thêm vào giỏ hàng
+    const handleAddToCart = async (e) => {
+        e.stopPropagation()
+
+        if (cartLoading) return // Tránh click nhiều lần
+
+        try {
+            await addItemToCart(product._id, 1, {})
+        } catch (error) {
+            console.error("Lỗi khi thêm vào giỏ hàng:", error)
+            toast.error(error.message || "Không thể thêm sản phẩm vào giỏ hàng")
+        }
     }
 
     return (
@@ -107,8 +125,8 @@ const RecommendedProductCard = ({ product }) => {
                     {/* Like Button */}
                     <button
                         className={`absolute top-8 right-2 p-1.5 rounded-full transition-all duration-300 shadow-lg ${isLiked
-                                ? "bg-pink-500 text-white"
-                                : "bg-white bg-opacity-90 text-gray-600 hover:bg-pink-500 hover:text-white"
+                            ? "bg-pink-500 text-white"
+                            : "bg-white bg-opacity-90 text-gray-600 hover:bg-pink-500 hover:text-white"
                             }`}
                         onClick={(e) => {
                             e.stopPropagation()
@@ -147,14 +165,12 @@ const RecommendedProductCard = ({ product }) => {
                     >
                         <Button
                             size="sm"
-                            className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white text-xs font-medium py-1.5 rounded-full flex items-center justify-center gap-1 shadow-lg transition-all duration-300"
-                            onClick={(e) => {
-                                e.stopPropagation()
-                                console.log("Add to cart:", product)
-                            }}
+                            className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white text-xs font-medium py-1.5 rounded-full flex items-center justify-center gap-1 shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={handleAddToCart}
+                            disabled={cartLoading}
                         >
                             <ShoppingCart className="w-3 h-3" />
-                            Thêm vào giỏ
+                            {cartLoading ? "Đang thêm..." : "Thêm vào giỏ"}
                         </Button>
                     </div>
                 </CardContent>

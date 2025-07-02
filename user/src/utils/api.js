@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 
 const api = axios.create({
   baseURL: 'http://localhost:5000/api', // hoặc domain backend của bạn
+  // baseURL: 'http://192.168.1.19:5000/api', // hoặc domain backend của bạn
   withCredentials: true, // QUAN TRỌNG: để nhận cookie (access, refresh token)
 });
 
@@ -49,7 +50,7 @@ api.interceptors.response.use(
         console.error('Làm mới token thất bại:', refreshError);
         // localStorage.removeItem('accessToken');
         toast.error('Phiên của bạn đã hết hạn. Vui lòng đăng nhập lại.');
-        
+
         // Gửi tín hiệu để mở LoginModal thay vì redirect ngay
         if (window.openLoginModal) {
           window.openLoginModal(); // Gọi hàm để mở modal (định nghĩa trong AuthContext)

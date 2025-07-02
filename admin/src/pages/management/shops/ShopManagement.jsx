@@ -474,6 +474,36 @@ export default function ShopManagement() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
+                    {/* Pagination */}
+                    {pagination.totalPages > 1 && (
+                        <div className="flex items-center justify-between mt-4">
+                            <div className="text-sm text-gray-500">
+                                Hiển thị {(pagination.page - 1) * pagination.limit + 1} -{" "}
+                                {Math.min(pagination.page * pagination.limit, pagination.total)} trong tổng số {pagination.total} shop
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setPagination((prev) => ({ ...prev, page: prev.page - 1 }))}
+                                    disabled={pagination.page === 1}
+                                >
+                                    Trước
+                                </Button>
+                                <span className="text-sm">
+                                    Trang {pagination.page} / {pagination.totalPages}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setPagination((prev) => ({ ...prev, page: prev.page + 1 }))}
+                                    disabled={pagination.page === pagination.totalPages}
+                                >
+                                    Sau
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                     <div className="rounded-md border">
                         <Table>
                             <TableHeader>

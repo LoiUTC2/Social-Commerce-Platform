@@ -7,6 +7,7 @@ import AccountPage from '../pages/social/AccountPage';
 import PostDetailPage from '../pages/social/PostDetailPage';
 import OrdersPage from '../pages/social/OrdersPage';
 import OrderDetailPage from '../pages/social/OrderDetailPage';
+import UserRecommendationsPage from '../pages/social/UserRecommendationsPage';
 
 const SocialRoutes = (
   <Route path="/feed" element={<MainLayout />}>
@@ -20,8 +21,9 @@ const SocialRoutes = (
 
     <Route path='/feed/order-details/:orderId' element={<OrderDetailPage />} />
 
-
     <Route path='/feed/post/:postId' element={<PostDetailPage />} />
+
+    <Route path='/feed/user-recommendation' element={<UserRecommendationsPage />} />
 
   </Route>
 );

@@ -157,7 +157,7 @@ const MarketplaceCategory = () => {
       {categories.length >= 12 && (
         <div className="mt-4 text-center">
           <button
-            onClick={() => navigate('/categories')}
+            onClick={() => navigate('/search')}
             className="text-pink-500 hover:text-pink-600 text-sm font-medium transition-colors"
           >
             Xem tất cả danh mục →
