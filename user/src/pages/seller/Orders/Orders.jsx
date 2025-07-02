@@ -578,12 +578,12 @@ export default function Orders() {
                           <div>
                             <div className="font-medium">{order.buyer?._id?.fullName || order.buyer?._id?.name || "Không có tên"}</div>
                             <div className="text-sm text-gray-600 flex items-center gap-1">
-                              {order.buyer?._id?.phone || order.buyer?._id?.contact.phone ? (
+                              {order.buyer?._id?.phone || order.buyer?._id?.contact?.phone ? (
                                 <>
                                   <Phone className="w-3 h-3" />
                                   {order.buyer._id.phone || order.buyer?._id?.contact.phone} 
                                 </>
-                              ) : order.buyer?._id?.email || order.buyer?._id?.contact.email? (
+                              ) : order.buyer?._id?.email || order.buyer?._id?.contact?.email? (
                                 <>
                                   <Mail className="w-3 h-3" />
                                   {order.buyer._id.email || order.buyer?._id?.contact.email}

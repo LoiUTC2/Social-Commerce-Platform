@@ -1,8 +1,8 @@
 const cron = require('node-cron');
 const { trainMatrixFactorization, prepareTfIdfMatrix } = require('./recommendationService');
 
-// Lịch huấn luyện mô hình Matrix Factorization vào 1h sáng Chủ nhật hàng tuần
-cron.schedule('0 1 * * 0', async () => {
+// Lịch huấn luyện mô hình Matrix Factorization vào 1h sáng mỗi ngày 
+cron.schedule('0 1 * * *', async () => { //phút, giờ, ngày, tháng, thứ (CN=0, T2 =1)
     try {
         console.log('🚀 Bắt đầu huấn luyện mô hình Matrix Factorization...');
         await trainMatrixFactorization();
@@ -13,7 +13,7 @@ cron.schedule('0 1 * * 0', async () => {
 });
 
 // Lịch cập nhật ma trận TF-IDF vào 2h sáng thứ Hai hàng tuần
-cron.schedule('0 2 * * 1', async () => {
+cron.schedule('0 2 * * *', async () => {
     try {
         console.log('🚀 Bắt đầu cập nhật ma trận TF-IDF...');
         await prepareTfIdfMatrix();

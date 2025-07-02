@@ -11,16 +11,25 @@ import { useNavigate } from "react-router-dom"
 import { cn } from "../../../lib/utils"
 import { getRecommendedUsers, getRecommendedUsersCaseLogin } from "../../../services/recommendationService"
 
+import { toggleFollow } from "../../../services/followService"
+import { useFollow } from "../../../contexts/FollowContext"
+import { toast } from "sonner"
+
 export default function RecommendedUsers() {
     const [users, setUsers] = useState([])
     const [isLoading, setIsLoading] = useState(true)
     const [isLoadingMore, setIsLoadingMore] = useState(false)
     const [error, setError] = useState(null)
-    const [followingUsers, setFollowingUsers] = useState(new Set())
+
+    const [followLoadingUsers, setFollowLoadingUsers] = useState(new Set())
+    const [followingStatus, setFollowingStatus] = useState(new Map())
+
     const [currentPage, setCurrentPage] = useState(1)
     const [hasMoreData, setHasMoreData] = useState(true)
     const [isExpanded, setIsExpanded] = useState(false)
-    const { isAuthenticated } = useAuth()
+
+    const { isAuthenticated, user, setShowLoginModal } = useAuth()
+    const { getFollowStatus, updateFollowStatus } = useFollow()
     const navigate = useNavigate()
 
     const ITEMS_PER_PAGE = 5
@@ -90,6 +99,35 @@ export default function RecommendedUsers() {
         }
     }
 
+    // Kiểm tra trạng thái follow khi users thay đổi
+    useEffect(() => {
+        const checkFollowStatus = async () => {
+            if (!user || users.length === 0) return;
+
+            const statusMap = new Map();
+
+            for (const userItem of users) {
+                if (user._id === userItem._id) {
+                    statusMap.set(userItem._id, false);
+                    continue;
+                }
+
+                try {
+                    const targetType = userItem.roles?.includes("seller") ? "shop" : "user";
+                    const isFollowing = await getFollowStatus(userItem._id, targetType);
+                    statusMap.set(userItem._id, isFollowing);
+                } catch (err) {
+                    console.error(`Lỗi kiểm tra trạng thái follow cho user ${userItem._id}:`, err);
+                    statusMap.set(userItem._id, false);
+                }
+            }
+
+            setFollowingStatus(statusMap);
+        };
+
+        checkFollowStatus();
+    }, [user, users, getFollowStatus]);
+
     const handleLoadMore = () => {
         if (!isLoadingMore && hasMoreData) {
             fetchRecommendedUsers(currentPage + 1, false)
@@ -104,18 +142,58 @@ export default function RecommendedUsers() {
     }
 
     const handleUserClick = (user) => {
-        navigate(`/profile/${user.slug || user._id}`)
+        navigate(`/feed/profile/${user.slug || user._id}`)
     }
 
     const handleViewAllUsers = () => {
-        navigate("/users/recommended")
+        navigate("/feed/user-recommendation")
     }
 
-    const handleFollow = (e, userId) => {
-        e.stopPropagation()
-        setFollowingUsers((prev) => new Set([...prev, userId]))
-        console.log("Theo dõi user:", userId)
-    }
+    const handleFollow = async (e, userItem) => {
+        e.stopPropagation();
+
+        if (!user) return setShowLoginModal(true);
+        if (user._id === userItem._id) return;
+
+        const userId = userItem._id;
+        setFollowLoadingUsers(prev => new Set([...prev, userId]));
+
+        try {
+            const targetType = userItem.roles?.includes("seller") ? "shop" : "user";
+            const res = await toggleFollow({
+                targetId: userId,
+                targetType
+            });
+
+            const newFollowStatus = res.data.isFollowing;
+
+            // Cập nhật state local
+            setFollowingStatus(prev => new Map(prev.set(userId, newFollowStatus)));
+
+            // Cập nhật cache
+            updateFollowStatus(userId, targetType, newFollowStatus);
+
+            toast.success(
+                newFollowStatus ? "Đã theo dõi" : "Đã bỏ theo dõi",
+                {
+                    description: newFollowStatus
+                        ? `Bạn đã theo dõi ${userItem.fullName}`
+                        : `Bạn đã bỏ theo dõi ${userItem.fullName}`
+                }
+            );
+        } catch (err) {
+            console.error("Lỗi toggle follow:", err);
+            toast.error("Có lỗi xảy ra", {
+                description: "Không thể thực hiện hành động này"
+            });
+        } finally {
+            setFollowLoadingUsers(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(userId);
+                return newSet;
+            });
+        }
+    };
 
     const handleMessage = (e, user) => {
         e.stopPropagation()
@@ -248,18 +326,20 @@ export default function RecommendedUsers() {
                                                 <MessageCircle className="w-3 h-3" />
                                             </Button>
                                             <Button
-                                                variant={followingUsers.has(user._id) ? "outline" : "default"}
+                                                variant={followingStatus.get(user._id) ? "outline" : "default"}
                                                 size="sm"
                                                 className={cn(
                                                     "h-7 px-3 text-xs transition-all",
-                                                    followingUsers.has(user._id)
+                                                    followingStatus.get(user._id)
                                                         ? "border-pink-200 text-pink-600 hover:bg-pink-50"
                                                         : "bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white",
                                                 )}
-                                                onClick={(e) => handleFollow(e, user._id)}
-                                                disabled={followingUsers.has(user._id)}
+                                                onClick={(e) => handleFollow(e, user)}
+                                                disabled={followLoadingUsers.has(user._id)}
                                             >
-                                                {followingUsers.has(user._id) ? (
+                                                {followLoadingUsers.has(user._id) ? (
+                                                    <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-1" />
+                                                ) : followingStatus.get(user._id) ? (
                                                     "Đã theo dõi"
                                                 ) : (
                                                     <>

@@ -1,10 +1,23 @@
 import api from '../utils/api';
 
-// 🔥 Lấy danh sách hashtag phổ biến (top N, mặc định 20)
-export const getPopularHashtags = async (limit = 20) => {
-    const res = await api.get('/hashtags/popular', {
-        params: { limit },
-    });
+// 🔥 Lấy danh sách hashtag phổ biến với phân trang
+export const getPopularHashtags = async (options = {}) => {
+    const {
+        limit = 20,
+        page = 1,
+        offset
+    } = options;
+
+    const params = { limit };
+
+    // Ưu tiên offset nếu có, không thì dùng page
+    if (offset !== undefined) {
+        params.offset = offset;
+    } else {
+        params.page = page;
+    }
+
+    const res = await api.get('/hashtags/popular', { params });
     return res.data;
 };
 

@@ -11,77 +11,40 @@ import { Badge } from '../ui/badge';
 
 import { X, Search, Package, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { getProductsByShopForUser } from '../../services/productService';
+import { getProductsForPosts } from '../../services/productService';
 
+//DÙNG CHO MỌI NGƯỜI ĐỀU ĐĂNG KÈM SẢN PHẨM ĐÓ ĐƯỢC, nếu như seller cho phép
 const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedProducts = [] }) => {
     const { user } = useAuth();
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [tempSelected, setTempSelected] = useState(selectedProducts);
-    const [stats, setStats] = useState({});
     const [pagination, setPagination] = useState({});
     const [currentPage, setCurrentPage] = useState(1);
     const [error, setError] = useState(null);
 
-    // Fetch sản phẩm từ shop của seller
-    const fetchProducts = async (page = 1, search = '', status = 'active') => {
-        if (!user?.shopId) return;
-        
+    // Fetch sản phẩm từ API getProductsForPosts
+    const fetchProducts = async (page = 1, search = '') => {
         setLoading(true);
         setError(null);
-        
+
         try {
-            const response = await getProductsByShopForUser(
-                user.shopId, 
-                page, 
-                12, // limit
-                'newest' // sort
-            );
+            const response = await getProductsForPosts(page, 12, search);
 
             if (response.success) {
-                let filteredProducts = response.data.products;
-
-                // Lọc theo tìm kiếm nếu có
-                if (search) {
-                    filteredProducts = filteredProducts.filter(product =>
-                        product.name.toLowerCase().includes(search.toLowerCase()) ||
-                        product.sku.toLowerCase().includes(search.toLowerCase()) ||
-                        (product.brand && product.brand.toLowerCase().includes(search.toLowerCase()))
-                    );
-                }
-
-                // Lọc theo trạng thái - chỉ lấy sản phẩm có thể đăng bài
-                if (status === 'active') {
-                    filteredProducts = filteredProducts.filter(p => p.isActive && p.allowPosts);
-                } else if (status === 'inactive') {
-                    filteredProducts = filteredProducts.filter(p => !p.isActive || !p.allowPosts);
-                }
-
-                setProducts(filteredProducts);
-                
-                // Tính toán thống kê từ dữ liệu đã lọc
-                const allProducts = response.data.products;
-                const calculatedStats = {
-                    total: filteredProducts.length,
-                    active: allProducts.filter(p => p.isActive && p.allowPosts).length,
-                    inactive: allProducts.filter(p => !p.isActive || !p.allowPosts).length,
-                    outOfStock: allProducts.filter(p => p.stock === 0).length,
-                    lowStock: allProducts.filter(p => p.stock > 0 && p.stock <= 5).length
-                };
-                setStats(calculatedStats);
-
-                // Cập nhật pagination info
-                setPagination({
-                    page: response.data.pagination?.page || page,
-                    limit: response.data.pagination?.limit || 12,
-                    total: filteredProducts.length,
-                    totalPages: Math.ceil(filteredProducts.length / 12)
-                });
+                setProducts(response.data.products);
+                setPagination(response.data.pagination);
+            } else {
+                setError('Không thể tải danh sách sản phẩm. Vui lòng thử lại.');
+                setProducts([]);
+                setPagination({});
             }
         } catch (error) {
             console.error('Lỗi khi tải sản phẩm:', error);
             setError('Không thể tải danh sách sản phẩm. Vui lòng thử lại.');
+            setProducts([]);
+            setPagination({});
         } finally {
             setLoading(false);
         }
@@ -89,12 +52,12 @@ const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedP
 
     // Load sản phẩm khi mở modal
     useEffect(() => {
-        if (open && user?.shopId) {
+        if (open) {
             setTempSelected(selectedProducts);
             setCurrentPage(1);
             fetchProducts(1, searchTerm);
         }
-    }, [open, user?.shopId, selectedProducts]);
+    }, [open, selectedProducts]);
 
     // Tìm kiếm với debounce
     useEffect(() => {
@@ -109,9 +72,8 @@ const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedP
     }, [searchTerm, open]);
 
     const handleToggleProduct = (product) => {
-        // Chỉ cho phép chọn sản phẩm active và allowPosts
-        if (!product.isActive || !product.allowPosts) return;
-
+        // Với API getProductsForPosts, tất cả sản phẩm trả về đều có thể chọn
+        // vì đã được filter isActive: true và allowPosts: true từ backend
         setTempSelected(prev => {
             const exists = prev.find(p => p._id === product._id);
             if (exists) {
@@ -153,29 +115,26 @@ const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedP
                     </DialogTitle>
                 </DialogHeader>
 
-                {/* Thanh tìm kiếm và thống kê */}
+                {/* Thanh tìm kiếm */}
                 <div className="flex-shrink-0 space-y-3">
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
                         <Input
-                            placeholder="Tìm kiếm sản phẩm theo tên, SKU, thương hiệu..."
+                            placeholder="Tìm kiếm sản phẩm theo tên, mô tả, hashtag..."
                             className="pl-10"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
 
-                    {/* Thống kê nhanh */}
-                    {stats.total !== undefined && (
+                    {/* Thông tin kết quả */}
+                    {pagination.total !== undefined && !loading && (
                         <div className="flex gap-4 text-sm">
+                            <Badge variant="outline" className="text-blue-600">
+                                Tìm thấy: {pagination.total} sản phẩm
+                            </Badge>
                             <Badge variant="outline" className="text-green-600">
-                                Có thể đăng: {stats.active}
-                            </Badge>
-                            <Badge variant="outline" className="text-red-600">
-                                Không thể đăng: {stats.inactive}
-                            </Badge>
-                            <Badge variant="outline" className="text-orange-600">
-                                Hết hàng: {stats.outOfStock}
+                                Đã chọn: {tempSelected.length}
                             </Badge>
                         </div>
                     )}
@@ -208,31 +167,28 @@ const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedP
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                             {products.map(product => {
                                 const isSelected = tempSelected.find(p => p._id === product._id);
-                                const canSelect = product.isActive && product.allowPosts;
                                 const finalPrice = getFinalPrice(product.price, product.discount);
 
                                 return (
                                     <div
                                         key={product._id}
-                                        className={`border rounded-lg p-3 cursor-pointer transition-all relative ${
-                                            isSelected
+                                        className={`border rounded-lg p-3 cursor-pointer transition-all relative ${isSelected
                                                 ? 'border-blue-500 bg-blue-50'
-                                                : canSelect
-                                                ? 'border-gray-200 hover:border-gray-300'
-                                                : 'border-gray-100 bg-gray-50 cursor-not-allowed opacity-75'
-                                        }`}
+                                                : 'border-gray-200 hover:border-gray-300'
+                                            }`}
                                         onClick={() => handleToggleProduct(product)}
                                     >
-                                        {/* Trạng thái sản phẩm */}
-                                        {!canSelect && (
-                                            <div className="absolute top-1 right-1 bg-red-500 text-white text-xs px-2 py-1 rounded">
-                                                {!product.isActive ? 'Ngừng bán' : 'Không cho đăng'}
-                                            </div>
-                                        )}
-
+                                        {/* Hiển thị trạng thái hết hàng */}
                                         {product.stock === 0 && (
                                             <div className="absolute top-1 left-1 bg-orange-500 text-white text-xs px-2 py-1 rounded">
                                                 Hết hàng
+                                            </div>
+                                        )}
+
+                                        {/* Hiển thị shop name nếu có */}
+                                        {product.seller?.shopName && (
+                                            <div className="absolute top-1 right-1 bg-gray-500 text-white text-xs px-2 py-1 rounded">
+                                                {product.seller.shopName}
                                             </div>
                                         )}
 
@@ -246,7 +202,7 @@ const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedP
                                                 <div className="font-medium text-sm line-clamp-2 mb-1">
                                                     {product.name}
                                                 </div>
-                                                
+
                                                 <div className="flex items-center gap-2 mb-1">
                                                     {product.discount > 0 ? (
                                                         <>
@@ -272,12 +228,27 @@ const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedP
                                                     <span>Đã bán: {product.soldCount}</span>
                                                 </div>
 
+                                                {/* Hiển thị rating nếu có */}
+                                                {product.ratings?.avg > 0 && (
+                                                    <div className="flex items-center gap-1 text-xs text-gray-500 mt-1">
+                                                        <span>⭐ {product.ratings.avg.toFixed(1)}</span>
+                                                        <span>({product.ratings.count})</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Hiển thị danh mục nếu có */}
+                                                {product.mainCategory?.name && (
+                                                    <div className="text-xs text-gray-400 mt-1">
+                                                        {product.mainCategory.name}
+                                                    </div>
+                                                )}
+
                                                 <div className="text-xs text-gray-400 mt-1">
                                                     SKU: {product.sku}
                                                 </div>
                                             </div>
 
-                                            {isSelected && canSelect && (
+                                            {isSelected && (
                                                 <div className="text-blue-500 flex-shrink-0">
                                                     <div className="w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs">
                                                         ✓
@@ -303,12 +274,12 @@ const ProductSelectionModal = ({ open, onOpenChange, onSelectProducts, selectedP
                         >
                             Trước
                         </Button>
-                        
+
                         <div className="flex items-center gap-1">
                             {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
                                 const page = i + Math.max(1, currentPage - 2);
                                 if (page > pagination.totalPages) return null;
-                                
+
                                 return (
                                     <Button
                                         key={page}

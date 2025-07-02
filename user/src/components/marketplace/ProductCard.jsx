@@ -12,10 +12,16 @@ import {
   isNewProduct,
   calculateDiscountedPrice,
 } from "../../utils/productFormatters"
+import { useNavigate } from "react-router-dom"
+import { useCart } from "../../contexts/CartContext"
+
 
 export default function ProductCard({ product, showAIScore = false, showNewBadge = false }) {
   const [isHovered, setIsHovered] = useState(false)
   const [isLiked, setIsLiked] = useState(false)
+  const navigate = useNavigate();
+  const { addItemToCart, loading: cartLoading } = useCart()
+  const [isAddingToCart, setIsAddingToCart] = useState(false)
 
   // Handle product click
   const handleProductClick = () => {
@@ -26,14 +32,29 @@ export default function ProductCard({ product, showAIScore = false, showNewBadge
 
   // Handle quick view
   const handleQuickView = (e) => {
-    e.stopPropagation()
+    navigate(`/marketplace/products/${product.slug}`)
     console.log("Quick view:", product)
   }
 
   // Handle add to cart
-  const handleAddToCart = (e) => {
+  const handleAddToCart = async (e) => {
     e.stopPropagation()
-    console.log("Add to cart:", product)
+
+    // Kiểm tra nếu sản phẩm có variants thì chuyển đến trang chi tiết
+    if (product.variants && product.variants.length > 0) {
+      navigate(`/marketplace/products/${product.slug}`)
+      return
+    }
+
+    try {
+      setIsAddingToCart(true)
+      // Sử dụng quantity mặc định là 1 và variants rỗng cho product card
+      await addItemToCart(product._id, 1, {})
+    } catch (error) {
+      console.error("Error adding to cart:", error)
+    } finally {
+      setIsAddingToCart(false)
+    }
   }
 
   // Handle like toggle
@@ -128,8 +149,8 @@ export default function ProductCard({ product, showAIScore = false, showNewBadge
           {/* Nút yêu thích */}
           <button
             className={`absolute top-2 right-2 p-2 rounded-full transition-all duration-300 shadow-lg ${isLiked
-                ? "bg-pink-500 text-white"
-                : "bg-white bg-opacity-90 text-gray-600 hover:bg-pink-500 hover:text-white"
+              ? "bg-pink-500 text-white"
+              : "bg-white bg-opacity-90 text-gray-600 hover:bg-pink-500 hover:text-white"
               }`}
             onClick={handleLikeToggle}
           >
@@ -170,9 +191,10 @@ export default function ProductCard({ product, showAIScore = false, showNewBadge
               size="sm"
               className="w-full bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-600 hover:to-pink-700 text-white text-xs font-medium py-2 rounded-full flex items-center justify-center gap-2 shadow-lg transition-all duration-300"
               onClick={handleAddToCart}
+              disabled={isAddingToCart || cartLoading}
             >
               <ShoppingCart className="w-4 h-4" />
-              Thêm vào giỏ
+              {isAddingToCart || cartLoading ? "Đang thêm..." : "Thêm vào giỏ"}
             </Button>
           </div>
         </CardContent>

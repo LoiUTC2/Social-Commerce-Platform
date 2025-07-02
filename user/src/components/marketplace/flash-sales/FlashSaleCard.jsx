@@ -70,7 +70,7 @@ const FlashSaleCard = ({ flashSale, onClick }) => {
     }
 
     const statusInfo = getStatusInfo()
-    const totalProducts = flashSale.enrichedProducts?.length || 0
+    const totalProducts = flashSale.enrichedProducts?.length || 3
     const totalSold = flashSale.summary?.totalSold || 0
     const avgDiscount = flashSale.summary?.avgDiscountPercent || 0
 

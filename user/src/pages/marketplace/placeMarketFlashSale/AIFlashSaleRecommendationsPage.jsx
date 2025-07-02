@@ -28,6 +28,10 @@ import {
     calculateTimeRemaining,
     calculateDiscountPercent,
 } from "../../../services/recommendationService"
+import { getFlashSaleForUser } from "../../../services/flashSaleService"
+
+import FlashSaleDetailModal from "../../../components/marketplace/flash-sales/FlashSaleDetailModal"
+
 
 const AIFlashSaleRecommendationsPage = () => {
     const [activeTab, setActiveTab] = useState("recommended")
@@ -37,6 +41,10 @@ const AIFlashSaleRecommendationsPage = () => {
     const [currentPage, setCurrentPage] = useState(1)
     const [loading, setLoading] = useState(true)
     const [searchLoading, setSearchLoading] = useState(false)
+
+    const [selectedFlashSale, setSelectedFlashSale] = useState(null)
+    const [modalOpen, setModalOpen] = useState(false)
+    const [modalLoading, setModalLoading] = useState(false)
 
     const [data, setData] = useState({
         flashSales: [],
@@ -264,6 +272,19 @@ const AIFlashSaleRecommendationsPage = () => {
         }
     }
 
+    const handleFlashSaleClick = async (flashSaleId) => {
+        try {
+            setModalLoading(true)
+            setModalOpen(true)
+            const response = await getFlashSaleForUser(flashSaleId)
+            setSelectedFlashSale(response.data)
+        } catch (err) {
+            console.error("Error fetching flash sale details:", err)
+        } finally {
+            setModalLoading(false)
+        }
+    }
+
     const handleTabChange = (value) => {
         setActiveTab(value)
         setCurrentPage(1)
@@ -404,6 +425,7 @@ const AIFlashSaleRecommendationsPage = () => {
                             setSortBy={setSortBy}
                             sortOrder={sortOrder}
                             setSortOrder={setSortOrder}
+                            onFlashSaleClick={handleFlashSaleClick}
                         />
                     </TabsContent>
 
@@ -416,6 +438,7 @@ const AIFlashSaleRecommendationsPage = () => {
                             loading={loading}
                             gradientFrom="from-red-500"
                             gradientTo="to-pink-500"
+                            onFlashSaleClick={handleFlashSaleClick}
                         />
                     </TabsContent>
 
@@ -428,6 +451,7 @@ const AIFlashSaleRecommendationsPage = () => {
                             loading={loading}
                             gradientFrom="from-orange-500"
                             gradientTo="to-red-500"
+                            onFlashSaleClick={handleFlashSaleClick}
                         />
                     </TabsContent>
 
@@ -440,10 +464,19 @@ const AIFlashSaleRecommendationsPage = () => {
                             loading={loading}
                             gradientFrom="from-green-500"
                             gradientTo="to-teal-500"
+                            onFlashSaleClick={handleFlashSaleClick}
                         />
                     </TabsContent>
                 </Tabs>
             </div>
+
+            {/* Flash Sale Detail Modal */}
+            <FlashSaleDetailModal
+                flashSale={selectedFlashSale}
+                open={modalOpen}
+                onOpenChange={setModalOpen}
+                loading={modalLoading}
+            />
         </div>
     )
 }
@@ -458,6 +491,7 @@ const AIRecommendedSection = ({
     setSortBy,
     sortOrder,
     setSortOrder,
+    onFlashSaleClick,
 }) => {
     if (loading) {
         return <LoadingSkeleton />
@@ -510,7 +544,7 @@ const AIRecommendedSection = ({
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
                         {data.flashSales.map((flashSale) => (
-                            <AIFlashSaleCard key={flashSale._id} flashSale={flashSale} />
+                            <AIFlashSaleCard key={flashSale._id} flashSale={flashSale} onFlashSaleClick={onFlashSaleClick} />
                         ))}
                     </div>
                 </div>
@@ -540,7 +574,7 @@ const AIRecommendedSection = ({
 }
 
 // Bulk Section Component
-const BulkSection = ({ title, description, data, loading, gradientFrom, gradientTo }) => {
+const BulkSection = ({ title, description, data, loading, gradientFrom, gradientTo, onFlashSaleClick }) => {
     if (loading) {
         return <LoadingSkeleton />
     }
@@ -564,7 +598,7 @@ const BulkSection = ({ title, description, data, loading, gradientFrom, gradient
             {data.flashSales.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {data.flashSales.map((flashSale) => (
-                        <AIFlashSaleCard key={flashSale._id} flashSale={flashSale} />
+                        <AIFlashSaleCard key={flashSale._id} flashSale={flashSale} onFlashSaleClick={onFlashSaleClick} />
                     ))}
                 </div>
             )}
@@ -585,7 +619,7 @@ const BulkSection = ({ title, description, data, loading, gradientFrom, gradient
 }
 
 // AI Flash Sale Card Component
-const AIFlashSaleCard = ({ flashSale }) => {
+const AIFlashSaleCard = ({ flashSale, onFlashSaleClick }) => {
     const formatCurrency = (amount) => {
         return new Intl.NumberFormat("vi-VN", {
             style: "currency",
@@ -642,7 +676,10 @@ const AIFlashSaleCard = ({ flashSale }) => {
                     </div>
 
                     {/* Action Button */}
-                    <Button className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white rounded-xl font-semibold py-3 group-hover:shadow-lg transition-all duration-300">
+                    <Button
+                        onClick={() => onFlashSaleClick && onFlashSaleClick(flashSale._id)}
+                        className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white rounded-xl font-semibold py-3 group-hover:shadow-lg transition-all duration-300"
+                    >
                         Khám phá ngay
                         <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
                     </Button>

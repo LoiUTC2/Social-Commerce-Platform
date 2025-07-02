@@ -83,9 +83,25 @@ const productSchema = new mongoose.Schema({
     allowPosts: { type: Boolean, default: true }, // Cho phép đăng bài viết kèm sản phẩm
     posts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }], // Danh sách các bài viết liên quan đến sản phẩm (nếu cần)
     hashtags: [String],
+
+    // TRACK FLASH SALE
+    currentFlashSale: {
+        flashSaleId: { type: mongoose.Schema.Types.ObjectId, ref: 'FlashSale' },
+        salePrice: { type: Number },
+        stockLimit: { type: Number },
+        soldCount: { type: Number, default: 0 },
+        startTime: { type: Date },
+        endTime: { type: Date },
+        isActive: { type: Boolean, default: false }
+    },
+
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
-}, { timestamps: true });
+}, {
+    timestamps: true,
+    toJSON: { virtuals: true }, // Bao gồm virtual fields khi convert sang JSON
+    toObject: { virtuals: true }
+});
 
 // Middleware để tự động tạo slug từ tên sản phẩm
 productSchema.pre('validate', function (next) {
@@ -384,6 +400,107 @@ productSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], async functio
         console.error('Error in pre-update productCount middleware:', error);
         next(error);
     }
+});
+
+//////////////////////FLASH SALE////////////////////
+
+// VIRTUAL FIELDS - Tự động tính toán giá
+productSchema.virtual('regularPrice').get(function () {
+    // Giá sau khi áp dụng discount thường
+    return this.price - (this.price * this.discount / 100);
+});
+
+productSchema.virtual('finalPrice').get(function () {
+    // Nếu có flash sale đang active
+    if (this.isInFlashSale) {
+        return this.currentFlashSale.salePrice;
+    }
+    // Nếu không có flash sale, trả về giá thường (đã giảm)
+    return this.regularPrice;
+});
+
+productSchema.virtual('isInFlashSale').get(function () {
+    if (!this.currentFlashSale || !this.currentFlashSale.isActive) {
+        return false;
+    }
+
+    const now = new Date();
+    return now >= this.currentFlashSale.startTime &&
+        now <= this.currentFlashSale.endTime &&
+        this.currentFlashSale.soldCount < this.currentFlashSale.stockLimit;
+});
+
+productSchema.virtual('discountInfo').get(function () {
+    const regularDiscount = this.discount; // % giảm giá thường
+    const originalPrice = this.price;
+    const regularPrice = this.regularPrice;
+    const finalPrice = this.finalPrice;
+
+    let flashSaleDiscount = 0;
+    let totalDiscount = regularDiscount;
+
+    if (this.isInFlashSale) {
+        // Tính % giảm giá của flash sale so với giá gốc
+        flashSaleDiscount = Math.round(((originalPrice - finalPrice) / originalPrice) * 100);
+        totalDiscount = flashSaleDiscount;
+    }
+
+    return {
+        originalPrice,
+        regularPrice,
+        finalPrice,
+        regularDiscount,
+        flashSaleDiscount,
+        totalDiscount,
+        savings: originalPrice - finalPrice,
+        isInFlashSale: this.isInFlashSale
+    };
+});
+
+// MIDDLEWARE: Tự động cập nhật currentFlashSale khi query
+productSchema.pre(['find', 'findOne', 'findOneAndUpdate'], async function () {
+    // Populate flash sale info nếu cần
+    this.populate({
+        path: 'currentFlashSale.flashSaleId',
+        select: 'name startTime endTime isActive'
+    });
+});
+
+// STATIC METHOD: Cập nhật flash sale cho sản phẩm
+productSchema.statics.updateFlashSaleStatus = async function (productId, flashSaleData) {
+    return await this.findByIdAndUpdate(
+        productId,
+        {
+            currentFlashSale: {
+                flashSaleId: flashSaleData.flashSaleId,
+                salePrice: flashSaleData.salePrice,
+                stockLimit: flashSaleData.stockLimit,
+                soldCount: flashSaleData.soldCount || 0,
+                startTime: flashSaleData.startTime,
+                endTime: flashSaleData.endTime,
+                isActive: true
+            }
+        },
+        { new: true }
+    );
+};
+
+// STATIC METHOD: Xóa flash sale khỏi sản phẩm
+productSchema.statics.removeFlashSale = async function (productId) {
+    return await this.findByIdAndUpdate(
+        productId,
+        {
+            $unset: { currentFlashSale: 1 }
+        },
+        { new: true }
+    );
+};
+
+// INDEX để tối ưu query flash sale
+productSchema.index({
+    'currentFlashSale.isActive': 1,
+    'currentFlashSale.startTime': 1,
+    'currentFlashSale.endTime': 1
 });
 
 // Single field index

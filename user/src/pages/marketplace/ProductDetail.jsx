@@ -4,9 +4,25 @@ import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { Button } from "../../components/ui/button"
 import { Card, CardContent } from "../../components/ui/card"
-import SuggestedProducts from '../../components/marketplace/products/SuggestedProducts';
+import { Badge } from "../../components/ui/badge"
+import { Progress } from "../../components/ui/progress"
+import SuggestedProducts from "../../components/marketplace/products/SuggestedProducts"
 import { getProductDetailForUser } from "../../services/productService"
-import { Heart, Share2, ShoppingCart, MessageCircle, Star, Truck, Shield, RotateCcw, Award } from "lucide-react"
+import {
+  Heart,
+  Share2,
+  ShoppingCart,
+  MessageCircle,
+  Star,
+  Truck,
+  Shield,
+  RotateCcw,
+  Award,
+  Clock,
+  Zap,
+  FlameIcon as Fire,
+  TrendingUp,
+} from "lucide-react"
 import { toast } from "sonner"
 import { useCart } from "../../contexts/CartContext"
 
@@ -30,6 +46,9 @@ export default function ProductDetail() {
   const [isLiked, setIsLiked] = useState(false)
   const [activeTab, setActiveTab] = useState("description")
 
+  // THÊM: State cho flash sale countdown
+  const [flashSaleTimeLeft, setFlashSaleTimeLeft] = useState(null)
+
   useEffect(() => {
     if (slug) {
       window.scrollTo({ top: 0, left: 0, behavior: "smooth" })
@@ -46,6 +65,31 @@ export default function ProductDetail() {
     }
   }, [product])
 
+  // THÊM: Effect để cập nhật countdown flash sale
+  useEffect(() => {
+    let interval = null
+
+    if (product?.flashSale?.isActive && product?.flashSale?.timeRemaining > 0) {
+      interval = setInterval(() => {
+        const now = new Date().getTime()
+        const endTime = new Date(product.flashSale.endTime).getTime()
+        const timeLeft = endTime - now
+
+        if (timeLeft > 0) {
+          setFlashSaleTimeLeft(timeLeft)
+        } else {
+          setFlashSaleTimeLeft(0)
+          // Có thể reload trang hoặc cập nhật trạng thái sản phẩm
+          clearInterval(interval)
+        }
+      }, 1000)
+    }
+
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [product?.flashSale])
+
   const fetchProductDetail = async () => {
     try {
       setLoading(true)
@@ -54,6 +98,13 @@ export default function ProductDetail() {
         setProduct(response.data.product)
         setRelatedProducts(response.data.relatedProducts)
         setReviewProduct(response.data.reviews)
+
+        // THÊM: Khởi tạo countdown nếu có flash sale
+        if (response.data.product.flashSale?.isActive) {
+          const now = new Date().getTime()
+          const endTime = new Date(response.data.product.flashSale.endTime).getTime()
+          setFlashSaleTimeLeft(endTime - now)
+        }
       } else {
         setError("Không thể tải thông tin sản phẩm")
       }
@@ -66,7 +117,12 @@ export default function ProductDetail() {
   }
 
   const handleQuantityChange = (newQuantity) => {
-    if (newQuantity >= 1 && newQuantity <= product?.stock) {
+    // THÊM: Kiểm tra giới hạn stock cho flash sale
+    const maxStock = product?.flashSale?.isActive
+      ? Math.min(product.stock, product.flashSale.stockRemaining)
+      : product?.stock
+
+    if (newQuantity >= 1 && newQuantity <= maxStock) {
       setQuantity(newQuantity)
     }
   }
@@ -77,6 +133,128 @@ export default function ProductDetail() {
 
   const calculateDiscountedPrice = (price, discount) => {
     return price - (price * discount) / 100
+  }
+
+  // THÊM: Hàm format thời gian countdown
+  const formatCountdown = (timeLeft) => {
+    if (!timeLeft || timeLeft <= 0) return "00:00:00"
+
+    const hours = Math.floor(timeLeft / (1000 * 60 * 60))
+    const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60))
+    const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000)
+
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+  }
+
+  // THÊM: Component Flash Sale Banner
+  const FlashSaleBanner = () => {
+    if (!product?.flashSale?.isActive) return null
+
+    const { flashSale } = product
+    const stockPercentage = (flashSale.soldCount / flashSale.originalStockLimit) * 100
+
+    return (
+      <div className="relative overflow-hidden bg-gradient-to-r from-pink-500 via-red-500 to-orange-500 text-white p-4 rounded-lg mb-4 shadow-lg">
+        {/* Background Pattern */}
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fillRule='evenodd'%3E%3Cg fill='%23ffffff' fillOpacity='0.1'%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E')]"></div>
+        </div>
+
+        <div className="relative z-10">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-white/20 px-2 py-1 rounded-full">
+                <Zap className="w-4 h-4 text-yellow-300" />
+                <span className="text-sm font-bold">FLASH SALE</span>
+              </div>
+              {flashSale.urgency?.isEndingSoon && (
+                <Badge variant="destructive" className="bg-red-600 hover:bg-red-700 animate-pulse">
+                  <Clock className="w-3 h-3 mr-1" />
+                  Sắp kết thúc!
+                </Badge>
+              )}
+            </div>
+
+            {/* Countdown Timer */}
+            <div className="flex items-center gap-2 bg-black/30 px-3 py-1 rounded-lg">
+              <Clock className="w-4 h-4" />
+              <span className="font-mono text-lg font-bold">{formatCountdown(flashSaleTimeLeft)}</span>
+            </div>
+          </div>
+
+          {/* Stock Progress */}
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span>
+                Đã bán: {flashSale.soldCount}/{flashSale.originalStockLimit}
+              </span>
+              <span>{Math.round(stockPercentage)}%</span>
+            </div>
+            <Progress value={stockPercentage} className="h-2 bg-white/20" />
+            {flashSale.urgency?.isAlmostSoldOut && (
+              <p className="text-sm text-yellow-200 flex items-center gap-1">
+                <Fire className="w-4 h-4" />
+                Chỉ còn {flashSale.stockRemaining} sản phẩm!
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // THÊM: Component giá flash sale
+  const FlashSalePrice = () => {
+    if (!product?.flashSale?.isActive) {
+      // Hiển thị giá thông thường
+      const discountedPrice =
+        product.discount > 0 ? calculateDiscountedPrice(product.price, product.discount) : product.price
+
+      return (
+        <div className="bg-gray-50 p-4 rounded-lg">
+          <div className="flex items-baseline gap-3">
+            {product.discount > 0 && (
+              <span className="text-lg text-gray-400 line-through">₫{formatPrice(product.price)}</span>
+            )}
+            <span className="text-3xl font-bold text-pink-500">₫{formatPrice(discountedPrice)}</span>
+            {product.discount > 0 && (
+              <span className="bg-pink-500 text-white px-2 py-1 rounded text-sm font-medium">
+                {product.discount}% GIẢM
+              </span>
+            )}
+          </div>
+        </div>
+      )
+    }
+
+    // Hiển thị giá flash sale
+    const { flashSale } = product
+    const originalPrice = product.price
+    const salePrice = flashSale.salePrice
+    const discountPercent = Math.round(((originalPrice - salePrice) / originalPrice) * 100)
+
+    return (
+      <div className="bg-gradient-to-r from-pink-50 to-red-50 p-4 rounded-lg border-2 border-pink-200">
+        <div className="flex items-center gap-2 mb-2">
+          <Badge className="bg-gradient-to-r from-pink-500 to-red-500 text-white">
+            <Zap className="w-3 h-3 mr-1" />
+            FLASH SALE
+          </Badge>
+          <Badge variant="outline" className="border-pink-500 text-pink-600">
+            -{discountPercent}%
+          </Badge>
+        </div>
+
+        <div className="flex items-baseline gap-3">
+          <span className="text-lg text-gray-400 line-through">₫{formatPrice(originalPrice)}</span>
+          <span className="text-3xl font-bold text-pink-600">₫{formatPrice(salePrice)}</span>
+        </div>
+
+        <div className="mt-2 text-sm text-pink-600 font-medium">
+          Tiết kiệm: ₫{formatPrice(originalPrice - salePrice)}
+        </div>
+      </div>
+    )
   }
 
   const renderStars = (rating, size = "sm") => {
@@ -220,6 +398,11 @@ export default function ProductDetail() {
     return mediaItems
   }
 
+  // THÊM: Tính toán stock hiển thị (ưu tiên flash sale stock)
+  const availableStock = product?.flashSale?.isActive
+    ? Math.min(product.stock, product.flashSale.stockRemaining)
+    : product?.stock
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Breadcrumb */}
@@ -242,6 +425,9 @@ export default function ProductDetail() {
       </div>
 
       <div className="max-w-7xl mx-auto p-4 space-y-4">
+        {/* THÊM: Flash Sale Banner */}
+        <FlashSaleBanner />
+
         {/* Main Product Card */}
         <Card className="overflow-hidden">
           <CardContent className="p-0">
@@ -271,11 +457,20 @@ export default function ProductDetail() {
                       />
                     )}
 
-                    {product.discount > 0 && (
-                      <div className="absolute top-4 left-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-                        -{product.discount}%
+                    {/* THÊM: Flash Sale Badge trên ảnh */}
+                    {product?.flashSale?.isActive ? (
+                      <div className="absolute top-4 left-4 bg-gradient-to-r from-pink-500 to-red-500 text-white px-3 py-1 rounded-full text-sm font-bold shadow-lg animate-pulse">
+                        <Zap className="w-4 h-4 inline mr-1" />
+                        FLASH SALE
                       </div>
+                    ) : (
+                      product.discount > 0 && (
+                        <div className="absolute top-4 left-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
+                          -{product.discount}%
+                        </div>
+                      )
                     )}
+
                     <button
                       onClick={() => setIsLiked(!isLiked)}
                       className="absolute top-4 right-4 p-2 bg-white rounded-full shadow-md hover:shadow-lg transition-shadow"
@@ -350,22 +545,20 @@ export default function ProductDetail() {
                     </div>
                     <span>|</span>
                     <span>{product.soldCount || 0} đã bán</span>
+                    {/* THÊM: Hiển thị trending nếu là flash sale */}
+                    {product?.flashSale?.isActive && (
+                      <>
+                        <span>|</span>
+                        <div className="flex items-center gap-1 text-pink-600">
+                          <TrendingUp className="w-4 h-4" />
+                          <span className="font-medium">Đang hot</span>
+                        </div>
+                      </>
+                    )}
                   </div>
 
-                  {/* Price */}
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <div className="flex items-baseline gap-3">
-                      {product.discount > 0 && (
-                        <span className="text-lg text-gray-400 line-through">₫{formatPrice(product.price)}</span>
-                      )}
-                      <span className="text-3xl font-bold text-pink-500">₫{formatPrice(discountedPrice)}</span>
-                      {product.discount > 0 && (
-                        <span className="bg-pink-500 text-white px-2 py-1 rounded text-sm font-medium">
-                          {product.discount}% GIẢM
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  {/* THÊM: Sử dụng component FlashSalePrice */}
+                  <FlashSalePrice />
                 </div>
 
                 {/* Variants */}
@@ -410,24 +603,42 @@ export default function ProductDetail() {
                       onChange={(e) => handleQuantityChange(Number.parseInt(e.target.value) || 1)}
                       className="w-16 text-center py-2 border-none outline-none"
                       min="1"
-                      max={product.stock}
+                      max={availableStock}
                     />
                     <button
                       onClick={() => handleQuantityChange(quantity + 1)}
-                      disabled={quantity >= product.stock}
+                      disabled={quantity >= availableStock}
                       className="px-3 py-2 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       +
                     </button>
                   </div>
-                  <span className="text-sm text-gray-600">{product.stock} sản phẩm có sẵn</span>
+                  {/* THÊM: Hiển thị stock với thông tin flash sale */}
+                  <div className="text-sm text-gray-600">
+                    {product?.flashSale?.isActive ? (
+                      <div className="flex flex-col">
+                        <span>{availableStock} sản phẩm có sẵn</span>
+                        {product.flashSale.urgency?.isAlmostSoldOut && (
+                          <span className="text-red-500 font-medium flex items-center gap-1">
+                            <Fire className="w-3 h-3" />
+                            Sắp hết hàng!
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span>{availableStock} sản phẩm có sẵn</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex gap-4">
                   <Button
                     variant="outline"
-                    className="flex-1 border-pink-500 text-pink-500 hover:bg-pink-50"
+                    className={`flex-1 ${product?.flashSale?.isActive
+                      ? "border-pink-500 text-pink-500 hover:bg-pink-50"
+                      : "border-pink-500 text-pink-500 hover:bg-pink-50"
+                      }`}
                     onClick={handleAddToCart}
                     disabled={isAddingToCart || cartLoading}
                   >
@@ -435,13 +646,40 @@ export default function ProductDetail() {
                     {isAddingToCart || cartLoading ? "Đang thêm..." : "Thêm vào giỏ hàng"}
                   </Button>
                   <Button
-                    className="flex-1 bg-pink-500 hover:bg-pink-600"
+                    className={`flex-1 ${product?.flashSale?.isActive
+                      ? "bg-gradient-to-r from-pink-500 to-red-500 hover:from-pink-600 hover:to-red-600"
+                      : "bg-pink-500 hover:bg-pink-600"
+                      }`}
                     onClick={handleBuyNow}
                     disabled={isBuyingNow || cartLoading}
                   >
-                    {isBuyingNow ? "Đang xử lý..." : "Mua ngay"}
+                    {/* THÊM: Icon đặc biệt cho flash sale */}
+                    {product?.flashSale?.isActive && <Zap className="w-4 h-4 mr-2" />}
+                    {isBuyingNow
+                      ? "Đang xử lý..."
+                      : product?.flashSale?.isActive
+                        ? "Mua ngay - Flash Sale"
+                        : "Mua ngay"}
                   </Button>
                 </div>
+
+                {/* THÊM: Flash Sale Warning */}
+                {product?.flashSale?.isActive &&
+                  (product.flashSale.urgency?.isEndingSoon || product.flashSale.urgency?.isAlmostSoldOut) && (
+                    <div className="bg-gradient-to-r from-red-50 to-pink-50 border border-red-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-red-600">
+                        <Fire className="w-5 h-5" />
+                        <div className="text-sm">
+                          <p className="font-medium">⚡ Cơ hội cuối cùng!</p>
+                          <p>
+                            {product.flashSale.urgency.isEndingSoon && "Flash sale sắp kết thúc. "}
+                            {product.flashSale.urgency.isAlmostSoldOut && "Chỉ còn ít sản phẩm. "}
+                            Đặt hàng ngay để không bỏ lỡ!
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                 {/* Additional Actions */}
                 <div className="flex justify-center gap-6 pt-4 border-t">
@@ -484,7 +722,7 @@ export default function ProductDetail() {
                 </div>
               </div>
               <div className="flex gap-3">
-                <Button variant="outline" className="flex items-center gap-2">
+                <Button variant="outline" className="flex items-center gap-2 bg-transparent">
                   <MessageCircle className="w-4 h-4" />
                   Chat ngay
                 </Button>
@@ -592,6 +830,25 @@ export default function ProductDetail() {
                       <span className="text-gray-600">Kho hàng:</span>
                       <span className="font-medium">{product.stock} sản phẩm</span>
                     </div>
+                    {/* THÊM: Thông tin flash sale trong specifications */}
+                    {product?.flashSale?.isActive && (
+                      <>
+                        <div className="flex justify-between py-2 border-b">
+                          <span className="text-gray-600">Flash Sale:</span>
+                          <span className="font-medium text-pink-600">Đang diễn ra</span>
+                        </div>
+                        <div className="flex justify-between py-2 border-b">
+                          <span className="text-gray-600">Giá Flash Sale:</span>
+                          <span className="font-medium text-pink-600">₫{formatPrice(product.flashSale.salePrice)}</span>
+                        </div>
+                        <div className="flex justify-between py-2 border-b">
+                          <span className="text-gray-600">Kết thúc:</span>
+                          <span className="font-medium">
+                            {new Date(product.flashSale.endTime).toLocaleString("vi-VN")}
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -697,7 +954,9 @@ export default function ProductDetail() {
                                 />
                                 <div>
                                   <div className="flex items-center gap-2">
-                                    <h4 className="font-medium text-gray-900">{review.reviewer._id?.name || review.reviewer._id?.fullName}</h4>
+                                    <h4 className="font-medium text-gray-900">
+                                      {review.reviewer._id?.name || review.reviewer._id?.fullName}
+                                    </h4>
                                     {review.isVerified && (
                                       <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center gap-1">
                                         <Shield className="w-3 h-3" />
@@ -747,13 +1006,16 @@ export default function ProductDetail() {
                                       <video
                                         src={video}
                                         className="w-full h-full object-cover rounded-md border cursor-pointer"
-                                        muted
+                                        controls         // hiện thanh điều khiển video
+                                        autoPlay         // tự động phát
+                                        muted            // cần thiết để autoPlay hoạt động trên nhiều trình duyệt
+                                        playsInline      // tránh toàn màn hình trên iOS khi play
                                       />
-                                      <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center rounded-md">
+                                      {/* <div className="absolute inset-0 bg-black bg-opacity-30 flex items-center justify-center rounded-md">
                                         <div className="w-6 h-6 bg-white rounded-full flex items-center justify-center">
                                           <div className="w-0 h-0 border-l-4 border-l-gray-800 border-y-2 border-y-transparent ml-0.5"></div>
                                         </div>
-                                      </div>
+                                      </div> */}
                                     </div>
                                   ))}
                                 </div>

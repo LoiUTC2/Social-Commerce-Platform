@@ -46,7 +46,8 @@ router.get('/:categoryId/can-delete', verifyToken, categoryController.checkCanDe
 router.post('/', verifyToken, categoryController.createCategory); //hiện tại đang cho ai thêm cũng được
 
 // [PUT] Cập nhật danh mục
-router.put('/:categoryId', verifyToken, requireRole('admin'), categoryController.updateCategory);
+// router.put('/:categoryId', verifyToken, requireRole('admin'), categoryController.updateCategory);
+router.put('/:categoryId', categoryController.updateCategory);
 
 // [DELETE] Xóa danh mục
 router.delete('/:categoryId', verifyToken, requireRole('admin'), categoryController.deleteCategory);

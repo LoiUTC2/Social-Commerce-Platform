@@ -11,10 +11,38 @@ const fs = require('fs').promises;
 const path = require('path');
 const FlashSale = require('../models/FlashSale');
 
-// Cache để lưu model trong memory
-let modelCache = null;
 
-// Thêm hàm chuẩn bị ma trận tất cả loại entity (product, post, user, shop) với trọng số phù hợp theo vai trò
+// Cache để lưu model trong memory (user_shop)
+let modelCache = null;
+let modelCacheTime = null;
+const MODEL_CACHE_DURATION = 3 * 60 * 1000; // 3 phút
+
+// Cache để lưu model MF trong memory (Matrix)
+let mfModelCache = null;
+let mfModelCacheTime = null;
+const MF_MODEL_CACHE_DURATION = 3 * 60 * 1000; // 3 phút
+
+// Hàm check xem có cần reload model không
+function shouldReloadModel() {
+    if (!modelCache || !modelCacheTime) return true;
+    return (Date.now() - modelCacheTime) > MODEL_CACHE_DURATION;
+}
+
+// Hàm check xem có cần reload MFmodel không
+function shouldReloadMFModel() {
+    if (!mfModelCache || !mfModelCacheTime) {
+        console.log('🔄 MF Model cache empty hoặc chưa có thời gian cache');
+        return true;
+    }
+
+    const isExpired = (Date.now() - mfModelCacheTime) > MF_MODEL_CACHE_DURATION;
+    console.log(`🔍 MF Cache check: ${isExpired ? 'EXPIRED' : 'VALID'}, Age: ${Math.floor((Date.now() - mfModelCacheTime) / 1000)}s`);
+    return isExpired;
+}
+////////////////////////////
+
+// Hàm chuẩn bị ma trận tất cả loại entity (product, post, user, shop) với trọng số phù hợp theo vai trò
+// Hàm chuẩn bị ma trận với validation tốt hơn
 async function prepareUserEntityMatrix() {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const interactions = await UserInteraction.find({
@@ -36,42 +64,38 @@ async function prepareUserEntityMatrix() {
 
     // Tạo danh sách user và entity duy nhất
     const users = [...new Set(interactions.map(i => i.author?._id?.toString() || i.sessionId))].sort();
-    console.log(`🔍 DEBUG: Users list: ${users.join(', ')}`);
+    console.log(`🔍 DEBUG: Users list: ${users.length} users`);
 
     // Sửa lỗi: Lọc bỏ các entity không hợp lệ
     const entities = [...new Set(interactions.map(i => {
         if (i.targetType === 'search') {
-            // Kiểm tra searchSignature tồn tại trước khi truy cập thuộc tính
             if (i.searchSignature && typeof i.searchSignature === 'object') {
                 const query = i.searchSignature.query || 'unknown';
                 const category = i.searchSignature.category || 'unknown';
                 const hashtags = Array.isArray(i.searchSignature.hashtags) ? i.searchSignature.hashtags.join('|') : '';
                 return `search:${query}:${category}:${hashtags}`;
             } else {
-                // Fallback nếu searchSignature không tồn tại hoặc không hợp lệ
                 return `search:unknown:unknown:`;
             }
         }
 
-        // Kiểm tra targetId có tồn tại và hợp lệ
         if (!i.targetId) {
             console.warn(`⚠️ targetId không tồn tại cho interaction:`, i._id);
             return null;
         }
 
         const targetIdStr = i.targetId.toString();
-        // Kiểm tra định dạng ObjectId (24 ký tự hex) cho các loại không phải search
         if (!/^[0-9a-fA-F]{24}$/.test(targetIdStr)) {
             console.warn(`⚠️ targetId không đúng định dạng ObjectId: ${targetIdStr}`);
             return null;
         }
 
         return `${i.targetType}:${targetIdStr}`;
-    }).filter(entity => entity !== null))]; // Loại bỏ các entity null
+    }).filter(entity => entity !== null))];
 
     console.log(`📊 Filtered entities: ${entities.length} valid entities from ${interactions.length} interactions`);
 
-    // Tạo ma trận user-entity
+    // Tạo ma trận user-entity với validation
     const matrix = Array(users.length).fill().map(() => Array(entities.length).fill(0));
 
     interactions.forEach(interaction => {
@@ -88,9 +112,8 @@ async function prepareUserEntityMatrix() {
                 entityKey = `search:unknown:unknown:`;
             }
         } else {
-            // Kiểm tra targetId trước khi sử dụng
             if (!interaction.targetId) {
-                return; // Bỏ qua interaction này
+                return;
             }
             entityKey = `${interaction.targetType}:${interaction.targetId.toString()}`;
         }
@@ -98,24 +121,46 @@ async function prepareUserEntityMatrix() {
         const entityIdx = entities.indexOf(entityKey);
 
         if (userIdx !== -1 && entityIdx !== -1) {
-            // Sử dụng weight trực tiếp, giữ nguyên giá trị âm cho hành vi tiêu cực
-            matrix[userIdx][entityIdx] = interaction.weight || 0;
-
-            // Loại bỏ các hành vi tiêu cực (unfollow, unsave, v.v.) nếu không mong muốn ảnh hưởng đến ma trận
-            if (interaction.action.includes('un') || interaction.action.includes('remove') || interaction.action.includes('clear')) {
-                matrix[userIdx][entityIdx] = Math.max(0, matrix[userIdx][entityIdx]); // Đặt giá trị không âm
+            // **FIX: Đảm bảo weight là số hợp lệ**
+            let weight = interaction.weight || 1;
+            if (isNaN(weight) || !isFinite(weight)) {
+                weight = 1; // Default weight
+            }
+            
+            // Chỉ lấy giá trị dương để tránh NaN
+            if (weight > 0) {
+                matrix[userIdx][entityIdx] = Math.max(matrix[userIdx][entityIdx], weight);
             }
         }
     });
+
+    // **FIX: Kiểm tra ma trận có hợp lệ không**
+    let hasValidData = false;
+    for (let i = 0; i < matrix.length; i++) {
+        for (let j = 0; j < matrix[i].length; j++) {
+            if (matrix[i][j] > 0 && isFinite(matrix[i][j])) {
+                hasValidData = true;
+                break;
+            }
+        }
+        if (hasValidData) break;
+    }
+
+    if (!hasValidData) {
+        console.warn('⚠️ Ma trận không có dữ liệu hợp lệ');
+        return { matrix: [], users: [], entities: [] };
+    }
 
     console.log(`📊 Đã tạo ma trận ${users.length} users x ${entities.length} entities`);
     return { matrix, users, entities };
 }
 
-////////////
+////////////////////////////
 
-// Huấn luyện mô hình User-Shop
+// Huấn luyện mô hình User-Shop - SỬA LẠI CÁCH CACHE
 async function trainUserShopModel() {
+    console.log('🚀 Bắt đầu training model mới...');
+
     const { matrix, users, entities } = await prepareUserEntityMatrix();
 
     if (!matrix.length || !users.length || !entities.length) {
@@ -127,13 +172,13 @@ async function trainUserShopModel() {
     const numEntities = entities.length;
     const numFactors = Math.min(50, Math.min(numUsers, numEntities));
 
-    console.log(`🎯 Bắt đầu huấn luyện với ${numUsers} users, ${numEntities} entities, ${numFactors} factors`);
+    console.log(`🎯 Training với ${numUsers} users, ${numEntities} entities, ${numFactors} factors`);
 
     // Tạo embedding layers
     const userEmbedding = tf.variable(tf.randomNormal([numUsers, numFactors], 0, 0.1));
     const entityEmbedding = tf.variable(tf.randomNormal([numEntities, numFactors], 0, 0.1));
 
-    // Tạo dữ liệu huấn luyện
+    // Tạo training data
     const trainData = [];
     for (let i = 0; i < numUsers; i++) {
         for (let j = 0; j < numEntities; j++) {
@@ -143,19 +188,18 @@ async function trainUserShopModel() {
         }
     }
 
-    console.log(`📊 Tạo được ${trainData.length} samples để huấn luyện`);
+    console.log(`📊 Training data: ${trainData.length} samples`);
 
     if (trainData.length === 0) {
-        console.warn('⚠️ Không có dữ liệu training');
+        console.warn('⚠️ Không có training data');
         userEmbedding.dispose();
         entityEmbedding.dispose();
         return null;
     }
 
-    // Optimizer
+    // Training loop
     const optimizer = tf.train.adam(0.01);
 
-    // Huấn luyện
     for (let epoch = 0; epoch < 50; epoch++) {
         let totalLoss = 0;
         const shuffledData = [...trainData].sort(() => Math.random() - 0.5);
@@ -194,130 +238,218 @@ async function trainUserShopModel() {
         }
     }
 
-    // Lấy data từ tensor trước khi dispose
-    const userEmbeddingData = await userEmbedding.data();
-    const entityEmbeddingData = await entityEmbedding.data();
-    const userEmbeddingShape = userEmbedding.shape;
-    const entityEmbeddingShape = entityEmbedding.shape;
-
-    // Lưu model
-    const modelData = {
-        userEmbedding: userEmbeddingData,
-        entityEmbedding: entityEmbeddingData,
-        userEmbeddingShape: userEmbeddingShape,
-        entityEmbeddingShape: entityEmbeddingShape,
-        users,
-        entities,
-        numUsers,
-        numEntities,
-        numFactors,
-        trainedAt: new Date().toISOString()
-    };
-
-    const modelDir = path.join(__dirname, '../models');
+    // Lấy data và lưu model - SỬA LẠI CÁCH LƯU
     try {
+        const userEmbeddingData = await userEmbedding.data();
+        const entityEmbeddingData = await entityEmbedding.data();
+
+        // Chuyển Float32Array thành regular array để JSON có thể serialize
+        const userEmbeddingArray = Array.from(userEmbeddingData);
+        const entityEmbeddingArray = Array.from(entityEmbeddingData);
+
+        const modelData = {
+            userEmbedding: userEmbeddingArray,
+            entityEmbedding: entityEmbeddingArray,
+            userEmbeddingShape: userEmbedding.shape,
+            entityEmbeddingShape: entityEmbedding.shape,
+            users,
+            entities,
+            numUsers,
+            numEntities,
+            numFactors,
+            trainedAt: new Date().toISOString()
+        };
+
+        const modelDir = path.join(__dirname, '../models');
         await fs.mkdir(modelDir, { recursive: true });
         await fs.writeFile(
             path.join(modelDir, 'user_shop_model.json'),
             JSON.stringify(modelData, null, 2)
         );
-        console.log('✅ Mô hình User/Shop đã được lưu thành công.');
-    } catch (error) {
-        console.error('❌ Lỗi khi lưu mô hình User/Shop:', error);
+
+        console.log('✅ Model saved successfully');
+
+        // Tạo model object để return và cache - QUAN TRỌNG: Tạo tensors mới
+        const model = {
+            userEmbedding: tf.tensor(userEmbeddingArray, userEmbedding.shape),
+            entityEmbedding: tf.tensor(entityEmbeddingArray, entityEmbedding.shape),
+            users,
+            entities,
+            numFactors,
+            trainedAt: modelData.trainedAt
+        };
+
+        // Cache trong memory - KHÔNG CACHE TENSORS VÀO REDIS
+        modelCache = model;
+        modelCacheTime = Date.now();
+
+        // CHỈ CACHE DATA THUẦN VÀO REDIS, KHÔNG CACHE TENSORS
+        try {
+            const redisModelData = {
+                userEmbedding: userEmbeddingArray,
+                entityEmbedding: entityEmbeddingArray,
+                userEmbeddingShape: userEmbedding.shape,
+                entityEmbeddingShape: entityEmbedding.shape,
+                users,
+                entities,
+                numFactors,
+                trainedAt: modelData.trainedAt
+            };
+            await redisClient.setex('user_shop_model_data', 1800, JSON.stringify(redisModelData));
+            console.log('💾 Đã cache User-Shop model data vào Redis');
+        } catch (redisError) {
+            console.warn('⚠️ Không thể cache User-Shop model vào Redis:', redisError.message);
+        }
+
+        // Cleanup original tensors
+        userEmbedding.dispose();
+        entityEmbedding.dispose();
+        optimizer.dispose();
+
+        return model;
+
+    } catch (saveError) {
+        console.error('❌ Lỗi khi lưu model:', saveError);
+        userEmbedding.dispose();
+        entityEmbedding.dispose();
+        optimizer.dispose();
+        return null;
     }
-
-    // Cleanup tensors sau khi lấy data
-    userEmbedding.dispose();
-    entityEmbedding.dispose();
-    optimizer.dispose();
-
-    // Trả về object với tensor mới được tạo từ data đã lưu
-    return {
-        userEmbedding: tf.tensor(Array.from(userEmbeddingData), userEmbeddingShape),
-        entityEmbedding: tf.tensor(Array.from(entityEmbeddingData), entityEmbeddingShape),
-        users,
-        entities,
-        numFactors
-    };
 }
 
-// Thêm hàm load mô hình User-Shop
+// SỬA LẠI HÀM LOAD MODEL
 async function loadUserShopModel() {
-    const modelPath = path.join(__dirname, '../models/user_shop_model.json');
+    // Kiểm tra cache trong memory trước
+    if (!shouldReloadModel()) {
+        console.log('✅ Sử dụng model từ memory cache');
+        return modelCache;
+    }
+
+    // Nếu hết hạn hoặc chưa có, lấy từ redis - SỬA KEY
+    const cacheKey = 'user_shop_model_data'; // Thay đổi key để tránh conflict
+
     try {
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            console.log('📦 Tìm thấy User-Shop model data trong Redis cache');
+            const modelData = JSON.parse(cached);
+
+            // TẠO LẠI TENSORS TỪ DATA
+            const model = {
+                userEmbedding: tf.tensor(modelData.userEmbedding, modelData.userEmbeddingShape),
+                entityEmbedding: tf.tensor(modelData.entityEmbedding, modelData.entityEmbeddingShape),
+                users: modelData.users,
+                entities: modelData.entities,
+                numFactors: modelData.numFactors,
+                trainedAt: modelData.trainedAt
+            };
+
+            modelCache = model;
+            modelCacheTime = Date.now();
+            return model;
+        }
+    } catch (redisError) {
+        console.warn('⚠️ Lỗi khi đọc User-Shop model từ Redis:', redisError.message);
+    }
+
+    // Nếu trên redis cũng không có, lấy từ file
+    const modelPath = path.join(__dirname, '../models/user_shop_model.json');
+
+    try {
+        // Kiểm tra file tồn tại
+        await fs.access(modelPath);
+        console.log('✅ File model tồn tại, đang load...');
+
         const modelDataStr = await fs.readFile(modelPath, 'utf8');
         const modelData = JSON.parse(modelDataStr);
 
-        console.log('🔍 Debug model data:', {
+        console.log('🔍 Debug model data structure:', {
             hasUserEmbedding: !!modelData.userEmbedding,
             hasEntityEmbedding: !!modelData.entityEmbedding,
+            userEmbeddingType: typeof modelData.userEmbedding,
+            entityEmbeddingType: typeof modelData.entityEmbedding,
             userEmbeddingLength: modelData.userEmbedding ? modelData.userEmbedding.length : 0,
             entityEmbeddingLength: modelData.entityEmbedding ? modelData.entityEmbedding.length : 0,
             userEmbeddingShape: modelData.userEmbeddingShape,
             entityEmbeddingShape: modelData.entityEmbeddingShape,
             usersCount: modelData.users?.length || 0,
-            entitiesCount: modelData.entities?.length || 0
+            entitiesCount: modelData.entities?.length || 0,
+            trainedAt: modelData.trainedAt
         });
 
-        // Kiểm tra dữ liệu model
+        // Kiểm tra các trường bắt buộc
+        const requiredFields = ['userEmbedding', 'entityEmbedding', 'userEmbeddingShape', 'entityEmbeddingShape', 'users', 'entities', 'numFactors'];
+        const missingFields = requiredFields.filter(field => !modelData[field]);
+
+        if (missingFields.length > 0) {
+            console.error('❌ Model data thiếu các trường:', missingFields);
+            return await trainUserShopModel();
+        }
+
+        // Kiểm tra arrays
+        if (!Array.isArray(modelData.users) || modelData.users.length === 0) {
+            console.error('❌ Users array không hợp lệ hoặc rỗng');
+            return await trainUserShopModel();
+        }
+
+        if (!Array.isArray(modelData.entities) || modelData.entities.length === 0) {
+            console.error('❌ Entities array không hợp lệ hoặc rỗng');
+            return await trainUserShopModel();
+        }
+
+        // Kiểm tra embedding data
         if (!modelData.userEmbedding || !modelData.entityEmbedding) {
-            console.error('❌ Model data thiếu embedding data');
+            console.error('❌ Embedding data không tồn tại');
             return await trainUserShopModel();
         }
 
-        if (!modelData.userEmbeddingShape || !modelData.entityEmbeddingShape) {
-            console.error('❌ Model data thiếu shape information');
+        // Chuyển đổi từ object về array nếu cần
+        let userEmbeddingData = modelData.userEmbedding;
+        let entityEmbeddingData = modelData.entityEmbedding;
+
+        // Nếu là object (từ tensor.data()), chuyển về array
+        if (userEmbeddingData && typeof userEmbeddingData === 'object' && !Array.isArray(userEmbeddingData)) {
+            userEmbeddingData = Object.values(userEmbeddingData);
+        }
+        if (entityEmbeddingData && typeof entityEmbeddingData === 'object' && !Array.isArray(entityEmbeddingData)) {
+            entityEmbeddingData = Object.values(entityEmbeddingData);
+        }
+
+        // Kiểm tra sau khi convert
+        if (!Array.isArray(userEmbeddingData) || userEmbeddingData.length === 0) {
+            console.error('❌ userEmbedding data không thể convert thành array hợp lệ');
             return await trainUserShopModel();
         }
 
-        // Kiểm tra userEmbedding data
-        if (!Array.isArray(modelData.userEmbedding) || modelData.userEmbedding.length === 0) {
-            console.error('❌ userEmbedding data không hợp lệ hoặc rỗng');
+        if (!Array.isArray(entityEmbeddingData) || entityEmbeddingData.length === 0) {
+            console.error('❌ entityEmbedding data không thể convert thành array hợp lệ');
             return await trainUserShopModel();
         }
 
-        if (!Array.isArray(modelData.entityEmbedding) || modelData.entityEmbedding.length === 0) {
-            console.error('❌ entityEmbedding data không hợp lệ hoặc rỗng');
+        // Kiểm tra shape consistency
+        const expectedUserSize = modelData.userEmbeddingShape[0] * modelData.userEmbeddingShape[1];
+        const expectedEntitySize = modelData.entityEmbeddingShape[0] * modelData.entityEmbeddingShape[1];
+
+        if (userEmbeddingData.length !== expectedUserSize) {
+            console.error(`❌ userEmbedding size mismatch: expected ${expectedUserSize}, got ${userEmbeddingData.length}`);
             return await trainUserShopModel();
         }
 
-        console.log('🔍 Loading model with shapes:', {
-            userEmbeddingShape: modelData.userEmbeddingShape,
-            entityEmbeddingShape: modelData.entityEmbeddingShape,
-            usersCount: modelData.users?.length || 0,
-            entitiesCount: modelData.entities?.length || 0
-        });
+        if (entityEmbeddingData.length !== expectedEntitySize) {
+            console.error(`❌ entityEmbedding size mismatch: expected ${expectedEntitySize}, got ${entityEmbeddingData.length}`);
+            return await trainUserShopModel();
+        }
 
-        // Tạo tensor từ dữ liệu đã lưu
+        // Tạo tensors với error handling
         let userEmbedding, entityEmbedding;
 
         try {
-            // Kiểm tra shape có khớp với dữ liệu không
-            const expectedUserSize = modelData.userEmbeddingShape[0] * modelData.userEmbeddingShape[1];
-            const expectedEntitySize = modelData.entityEmbeddingShape[0] * modelData.entityEmbeddingShape[1];
+            userEmbedding = tf.tensor(userEmbeddingData, modelData.userEmbeddingShape);
+            entityEmbedding = tf.tensor(entityEmbeddingData, modelData.entityEmbeddingShape);
 
-            if (modelData.userEmbedding.length !== expectedUserSize) {
-                console.error(`❌ userEmbedding size không khớp: expected ${expectedUserSize}, got ${modelData.userEmbedding.length}`);
-                return await trainUserShopModel();
-            }
-
-            if (modelData.entityEmbedding.length !== expectedEntitySize) {
-                console.error(`❌ entityEmbedding size không khớp: expected ${expectedEntitySize}, got ${modelData.entityEmbedding.length}`);
-                return await trainUserShopModel();
-            }
-
-            userEmbedding = tf.tensor(
-                Array.from(modelData.userEmbedding),
-                modelData.userEmbeddingShape
-            );
-            entityEmbedding = tf.tensor(
-                Array.from(modelData.entityEmbedding),
-                modelData.entityEmbeddingShape
-            );
-
-            // Kiểm tra tensor đã được tạo đúng chưa
+            // Validate tensors
             if (!userEmbedding.shape || !entityEmbedding.shape) {
-                throw new Error('Tensor shape is undefined after creation');
+                throw new Error('Invalid tensor shapes after creation');
             }
 
             console.log('✅ Tensors created successfully:', {
@@ -326,40 +458,69 @@ async function loadUserShopModel() {
             });
 
         } catch (tensorError) {
-            console.error('❌ Lỗi khi tạo tensor:', tensorError);
-            // Cleanup nếu có lỗi
+            console.error('❌ Lỗi khi tạo tensors:', tensorError);
             if (userEmbedding) userEmbedding.dispose();
             if (entityEmbedding) entityEmbedding.dispose();
             return await trainUserShopModel();
         }
 
-        return {
+        // Tạo model object
+        const model = {
             userEmbedding,
             entityEmbedding,
-            users: modelData.users || [],
-            entities: modelData.entities || [],
-            numFactors: modelData.numFactors || 50
+            users: modelData.users,
+            entities: modelData.entities,
+            numFactors: modelData.numFactors,
+            trainedAt: modelData.trainedAt
         };
+
+        // Cache trong memory
+        modelCache = model;
+        modelCacheTime = Date.now();
+
+        // Cache DATA (không phải tensors) vào Redis
+        try {
+            const redisModelData = {
+                userEmbedding: userEmbeddingData,
+                entityEmbedding: entityEmbeddingData,
+                userEmbeddingShape: modelData.userEmbeddingShape,
+                entityEmbeddingShape: modelData.entityEmbeddingShape,
+                users: modelData.users,
+                entities: modelData.entities,
+                numFactors: modelData.numFactors,
+                trainedAt: modelData.trainedAt
+            };
+            await redisClient.setex(cacheKey, 1800, JSON.stringify(redisModelData));
+        } catch (redisCacheError) {
+            console.warn('⚠️ Không thể cache vào Redis:', redisCacheError.message);
+        }
+
+        console.log(`✅ Model loaded successfully from file. Users: ${modelData.users.length}, Entities: ${modelData.entities.length}`);
+        return model;
+
     } catch (error) {
-        console.log('⚠️ Không thể load mô hình User/Shop, sẽ huấn luyện mới:', error.message);
+        console.log('⚠️ Không thể load model từ file, training model mới:', error.message);
+
+        // Clear cache nếu có lỗi
+        modelCache = null;
+        modelCacheTime = null;
+
         return await trainUserShopModel();
     }
 }
 
-// gợi ý User/Shop, hỗ trợ phân trang, error handling và timeout tốt hơn
+// Hàm gợi ý User/Shop hoàn chỉnh
 async function getUserShopRecommendations(userId, sessionId, limit = 10, entityType = 'all', role = 'user', options = {}) {
     console.log('🚀 Starting getUserShopRecommendations:', { userId, sessionId, limit, entityType, role, options });
 
-    // Thêm options để hỗ trợ các tính năng mở rộng
     const {
         enableCache = true,
-        cacheTimeout = 1800, // 30 phút
-        includeInactive = false, // Có bao gồm user/shop không active không
+        cacheTimeout = 1800, //3phuts  // 30 phút, 1800
+        includeInactive = false,
         sortBy = 'score', // 'score', 'followers', 'created', 'random'
-        minScore = 0 // Điểm tối thiểu để lọc
+        minScore = 0
     } = options;
 
-    // Timeout cho toàn bộ function
     const FUNCTION_TIMEOUT = 25000; // 25 giây
     const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Function timeout - getUserShopRecommendations')), FUNCTION_TIMEOUT);
@@ -367,7 +528,7 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
 
     try {
         const mainProcess = async () => {
-            // 1. Kiểm tra cache trước (nếu enable)
+            // 1. Kiểm tra cache
             if (enableCache) {
                 const cacheKey = `user_shop_recs:${userId || sessionId}:${entityType}:${role}:${limit}:${sortBy}:${minScore}`;
                 try {
@@ -375,16 +536,16 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
                     if (cached) {
                         console.log('✅ Lấy từ cache thành công');
                         const result = JSON.parse(cached);
-                        return result.slice(0, limit); // Đảm bảo limit chính xác
+                        return result.slice(0, limit);
                     }
                 } catch (cacheError) {
                     console.warn('⚠️ Lỗi cache, tiếp tục xử lý:', cacheError.message);
                 }
             }
 
-            // 2. Load model với timeout
+            // 2. Load model
             console.log('🔄 Loading model...');
-            const MODEL_TIMEOUT = 15000; // 15 giây cho load model
+            const MODEL_TIMEOUT = 15000; // 15 giây
             const modelTimeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => reject(new Error('Model loading timeout')), MODEL_TIMEOUT);
             });
@@ -410,15 +571,22 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
 
             if (!userEmbedding || !entityEmbedding || !users || !entities) {
                 console.error('❌ Model components không hợp lệ');
-                if (userEmbedding) userEmbedding.dispose();
-                if (entityEmbedding) entityEmbedding.dispose();
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
+                return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
+            }
+
+            if (typeof userEmbedding.slice !== 'function' || typeof entityEmbedding.slice !== 'function') {
+                console.error('❌ userEmbedding hoặc entityEmbedding không phải là TensorFlow tensors');
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
                 return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
             }
 
             if (!Array.isArray(users) || !Array.isArray(entities) || users.length === 0 || entities.length === 0) {
                 console.error('❌ Users hoặc entities không hợp lệ');
-                userEmbedding.dispose();
-                entityEmbedding.dispose();
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
                 return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
             }
 
@@ -426,27 +594,27 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
             const userIdx = users.indexOf(userId || sessionId);
             if (userIdx === -1) {
                 console.log(`⚠️ User ${userId || sessionId} không tồn tại trong model`);
-                userEmbedding.dispose();
-                entityEmbedding.dispose();
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
                 return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
             }
 
             // 5. Validate tensor shapes và user index
             if (!userEmbedding.shape || !entityEmbedding.shape) {
                 console.error('❌ Tensor shapes không hợp lệ');
-                userEmbedding.dispose();
-                entityEmbedding.dispose();
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
                 return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
             }
 
             if (userIdx >= userEmbedding.shape[0]) {
                 console.error(`❌ userIdx ${userIdx} vượt quá embedding size ${userEmbedding.shape[0]}`);
-                userEmbedding.dispose();
-                entityEmbedding.dispose();
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
                 return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
             }
 
-            // 6. Thực hiện prediction với error handling
+            // 6. Thực hiện prediction
             let userVec, scores, scoresArray;
             try {
                 console.log('🔄 Computing predictions...');
@@ -468,8 +636,8 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
                 console.error('❌ Lỗi prediction:', predictionError.message);
                 if (userVec) userVec.dispose();
                 if (scores) scores.dispose();
-                userEmbedding.dispose();
-                entityEmbedding.dispose();
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
                 return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
             }
 
@@ -484,10 +652,9 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
                 })).filter(item =>
                     item.entityId &&
                     typeof item.entityId === 'string' &&
-                    item.score >= minScore // Lọc theo điểm tối thiểu
+                    item.score >= minScore
                 );
 
-                // Filter theo entity type
                 if (entityType === 'user') {
                     filteredEntityScores = entityScores.filter(e => e.entityId.startsWith('user:'));
                 } else if (entityType === 'shop') {
@@ -498,15 +665,12 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
                     );
                 }
 
-                // Sort theo yêu cầu
                 if (sortBy === 'score') {
                     filteredEntityScores.sort((a, b) => b.score - a.score);
                 } else if (sortBy === 'random') {
                     filteredEntityScores.sort(() => Math.random() - 0.5);
                 }
-                // Các kiểu sort khác sẽ được xử lý trong fetchEntityDetailsWithTimeout
 
-                // Lấy nhiều hơn limit để có dự phòng
                 filteredEntityScores = filteredEntityScores.slice(0, Math.min(limit * 3, 100));
 
             } catch (processingError) {
@@ -514,17 +678,17 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
                 filteredEntityScores = [];
             }
 
-            // 8. Cleanup tensors ngay sau khi xử lý xong
+            // 8. Cleanup tensors
             try {
                 userVec.dispose();
                 scores.dispose();
-                userEmbedding.dispose();
-                entityEmbedding.dispose();
+                if (typeof userEmbedding?.dispose === 'function') userEmbedding.dispose();
+                if (typeof entityEmbedding?.dispose === 'function') entityEmbedding.dispose();
             } catch (cleanupError) {
                 console.warn('⚠️ Lỗi cleanup tensors:', cleanupError.message);
             }
 
-            // 9. Fetch detailed information với timeout và batch processing
+            // 9. Fetch detailed information
             console.log(`🔄 Fetching details for ${filteredEntityScores.length} entities...`);
 
             if (filteredEntityScores.length === 0) {
@@ -538,7 +702,7 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
                 { includeInactive, sortBy }
             );
 
-            // 10. Cache result nếu có và enable cache
+            // 10. Cache result
             if (result.length > 0 && enableCache) {
                 try {
                     const cacheKey = `user_shop_recs:${userId || sessionId}:${entityType}:${role}:${limit}:${sortBy}:${minScore}`;
@@ -552,14 +716,12 @@ async function getUserShopRecommendations(userId, sessionId, limit = 10, entityT
             return result;
         };
 
-        // Chạy main process với timeout
         return await Promise.race([mainProcess(), timeoutPromise]);
 
     } catch (error) {
         console.error('❌ Lỗi getUserShopRecommendations:', error.message);
         console.error('❌ Stack:', error.stack);
 
-        // Fallback cuối cùng
         try {
             return await getPopularShopsFallback(limit, entityType, { includeInactive, sortBy });
         } catch (fallbackError) {
@@ -608,7 +770,7 @@ async function fetchEntityDetailsWithTimeout(entityScores, limit, options = {}) 
                         }
 
                         const user = await User.findOne(query)
-                            .select('_id fullName avatar bio createdAt isActive')
+                            .select('_id fullName avatar coverImage bio slug createdAt isActive')
                             .lean()
                             .maxTimeMS(2000);
 
@@ -639,7 +801,7 @@ async function fetchEntityDetailsWithTimeout(entityScores, limit, options = {}) 
                         }
 
                         const shop = await Shop.findOne(query)
-                            .select('_id name description avatar logo contact stats createdAt status')
+                            .select('_id name description avatar coverImage slug logo contact stats createdAt status')
                             .lean()
                             .maxTimeMS(2000);
 
@@ -727,7 +889,7 @@ async function getPopularShopsFallback(limit = 10, entityType = 'all', options =
             }
 
             const shops = await Shop.find(query)
-                .select('_id name description avatar logo contact stats createdAt status')
+                .select('_id name description avatar coverImage slug logo contact stats createdAt status')
                 .sort(sort)
                 .limit(limit)
                 .lean()
@@ -754,7 +916,7 @@ async function getPopularShopsFallback(limit = 10, entityType = 'all', options =
             }
 
             const users = await User.find(query)
-                .select('_id fullName avatar bio createdAt isActive')
+                .select('_id fullName avatar coverImage slug bio createdAt isActive')
                 .sort(sort)
                 .limit(limit)
                 .lean()
@@ -769,14 +931,14 @@ async function getPopularShopsFallback(limit = 10, entityType = 'all', options =
                 'status.isActive': true,
                 'status.isApprovedCreate': true
             })
-                .select('_id name description avatar logo contact stats createdAt status')
+                .select('_id name description avatar coverImage slug logo contact stats createdAt status')
                 .sort({ 'stats.followers': -1 })
                 .limit(halfLimit)
                 .lean()
                 .maxTimeMS(2000),
 
             User.find(includeInactive ? {} : { isActive: true })
-                .select('_id fullName avatar bio createdAt isActive')
+                .select('_id fullName avatar coverImage bio slug createdAt isActive')
                 .sort({ createdAt: -1 })
                 .limit(halfLimit)
                 .lean()
@@ -808,10 +970,12 @@ async function getPopularShopsFallback(limit = 10, entityType = 'all', options =
     }
 }
 
+
 //////////////
 
 // Matrix Factorization: Huấn luyện mô hình dựa trên tương tác người dùng
 // Hàm huấn luyện mô hình Matrix Factorization: tạo gợi ý dựa trên hành vi (collaborative filtering).
+// **FIX: Hàm train với validation tốt hơn**
 async function trainMatrixFactorization() {
     const { matrix, users, entities } = await prepareUserEntityMatrix();
 
@@ -822,19 +986,19 @@ async function trainMatrixFactorization() {
 
     const numUsers = users.length;
     const numEntities = entities.length;
-    const numFactors = Math.min(20, Math.min(numUsers, numEntities)); // Giảm từ 50 xuống 20
+    const numFactors = Math.min(10, Math.min(numUsers, numEntities)); // Giảm xuống 10
 
     console.log(`🎯 Bắt đầu huấn luyện với ${numUsers} users, ${numEntities} entities, ${numFactors} factors`);
 
-    // Tạo embedding layers
-    const userEmbedding = tf.variable(tf.randomNormal([numUsers, numFactors], 0, 0.1));
-    const entityEmbedding = tf.variable(tf.randomNormal([numEntities, numFactors], 0, 0.1));
+    // **FIX: Tạo embedding với giá trị nhỏ hơn**
+    const userEmbedding = tf.variable(tf.randomNormal([numUsers, numFactors], 0, 0.01)); // Giảm std
+    const entityEmbedding = tf.variable(tf.randomNormal([numEntities, numFactors], 0, 0.01));
 
-    // Tạo dữ liệu huấn luyện
+    // Tạo dữ liệu huấn luyện với validation
     const trainData = [];
     for (let i = 0; i < numUsers; i++) {
         for (let j = 0; j < numEntities; j++) {
-            if (matrix[i][j] > 0) {
+            if (matrix[i][j] > 0 && isFinite(matrix[i][j])) {
                 trainData.push({ userIdx: i, entityIdx: j, rating: matrix[i][j] });
             }
         }
@@ -843,55 +1007,37 @@ async function trainMatrixFactorization() {
     console.log(`📊 Tạo được ${trainData.length} samples để huấn luyện`);
 
     if (trainData.length === 0) {
-        console.warn('⚠️ Không có dữ liệu training');
+        console.warn('⚠️ Không có dữ liệu training cho MF model');
+        userEmbedding.dispose();
+        entityEmbedding.dispose();
         return null;
     }
 
-    // Optimizer với learning rate cao hơn để converge nhanh
-    const optimizer = tf.train.adam(0.05); // Tăng từ 0.01 lên 0.05
-
-    // Giảm số epoch để tránh timeout
-    const maxEpochs = Math.min(20, Math.max(10, Math.ceil(100 / trainData.length))); // Tối đa 20 epochs
+    // **FIX: Optimizer với learning rate thấp hơn**
+    const optimizer = tf.train.adam(0.001); // Giảm learning rate
+    const maxEpochs = 5; // Giảm epochs
+    
     console.log(`🔄 Sử dụng ${maxEpochs} epochs`);
 
-    // Huấn luyện
+    // **FIX: Training loop với NaN detection**
     for (let epoch = 0; epoch < maxEpochs; epoch++) {
         let totalLoss = 0;
+        let validBatches = 0;
 
-        // Fisher-Yates shuffle - tối ưu hóa
         const shuffledData = [...trainData];
         for (let i = shuffledData.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [shuffledData[i], shuffledData[j]] = [shuffledData[j], shuffledData[i]];
         }
 
-        // Training loop với batch processing
-        const batchSize = Math.min(16, trainData.length); // Batch processing
+        const batchSize = Math.min(8, trainData.length); // Giảm batch size
+        
         for (let batchStart = 0; batchStart < shuffledData.length; batchStart += batchSize) {
             const batchEnd = Math.min(batchStart + batchSize, shuffledData.length);
             const batch = shuffledData.slice(batchStart, batchEnd);
 
             try {
-                const batchLoss = tf.tidy(() => {
-                    let batchTotalLoss = tf.scalar(0);
-
-                    for (const sample of batch) {
-                        const userVec = userEmbedding.slice([sample.userIdx, 0], [1, numFactors]);
-                        const entityVec = entityEmbedding.slice([sample.entityIdx, 0], [1, numFactors]);
-                        const prediction = tf.matMul(userVec, entityVec, false, true).squeeze();
-                        const label = tf.scalar(sample.rating);
-                        const loss = tf.losses.meanSquaredError(label, prediction);
-                        batchTotalLoss = batchTotalLoss.add(loss);
-                    }
-
-                    return batchTotalLoss.div(tf.scalar(batch.length));
-                });
-
-                totalLoss += await batchLoss.data();
-                batchLoss.dispose();
-
-                // Optimize batch
-                optimizer.minimize(() => {
+                const batchLoss = optimizer.minimize(() => {
                     return tf.tidy(() => {
                         let batchTotalLoss = tf.scalar(0);
 
@@ -901,12 +1047,34 @@ async function trainMatrixFactorization() {
                             const prediction = tf.matMul(userVec, entityVec, false, true).squeeze();
                             const label = tf.scalar(sample.rating);
                             const loss = tf.losses.meanSquaredError(label, prediction);
-                            batchTotalLoss = batchTotalLoss.add(loss);
+                            
+                            // **FIX: Thêm L2 regularization**
+                            const l2Loss = tf.mul(0.01, tf.add(
+                                tf.sum(tf.square(userVec)),
+                                tf.sum(tf.square(entityVec))
+                            ));
+                            
+                            batchTotalLoss = batchTotalLoss.add(loss).add(l2Loss);
                         }
 
                         return batchTotalLoss.div(tf.scalar(batch.length));
                     });
                 });
+
+                // **FIX: Kiểm tra NaN loss**
+                const lossValue = await batchLoss.data();
+                if (isNaN(lossValue[0]) || !isFinite(lossValue[0])) {
+                    console.error(`❌ NaN loss detected at epoch ${epoch}, batch ${batchStart}. Stopping training.`);
+                    batchLoss.dispose();
+                    userEmbedding.dispose();
+                    entityEmbedding.dispose();
+                    optimizer.dispose();
+                    return null;
+                }
+
+                totalLoss += lossValue[0];
+                validBatches++;
+                batchLoss.dispose();
 
             } catch (batchError) {
                 console.error(`❌ Lỗi tại batch ${batchStart}-${batchEnd}:`, batchError);
@@ -914,39 +1082,57 @@ async function trainMatrixFactorization() {
             }
         }
 
-        // Log ít hơn để giảm I/O
-        if (epoch % 5 === 0 || epoch === maxEpochs - 1) {
-            console.log(`Epoch ${epoch + 1}/${maxEpochs}, Average Loss: ${totalLoss / Math.ceil(trainData.length / batchSize)}`);
+        const avgLoss = validBatches > 0 ? totalLoss / validBatches : 0;
+        console.log(`MF Model Epoch ${epoch + 1}/${maxEpochs}, Average Loss: ${avgLoss.toFixed(6)}`);
+        
+        // **FIX: Dừng training nếu loss quá cao**
+        if (avgLoss > 1000) {
+            console.warn('⚠️ Loss quá cao, dừng training');
+            break;
         }
     }
 
-    // Lưu model
-    const modelData = {
-        userEmbedding: await userEmbedding.data(),
-        entityEmbedding: await entityEmbedding.data(),
-        userEmbeddingShape: userEmbedding.shape,
-        entityEmbeddingShape: entityEmbedding.shape,
-        users: users || [],
-        entities: entities || [],
-        numUsers: users?.length || 0,
-        numEntities: entities?.length || 0,
-        numFactors: numFactors || 0,
-        trainedAt: new Date().toISOString()
-    };
-
-    const modelDir = path.join(__dirname, '../models');
+    // **FIX: Validation trước khi lưu**
     try {
+        const userEmbeddingData = await userEmbedding.data();
+        const entityEmbeddingData = await entityEmbedding.data();
+
+        // Kiểm tra NaN trong embedding
+        if (userEmbeddingData.some(v => isNaN(v) || !isFinite(v)) ||
+            entityEmbeddingData.some(v => isNaN(v) || !isFinite(v))) {
+            console.error('❌ Embedding chứa NaN hoặc Infinity');
+            userEmbedding.dispose();
+            entityEmbedding.dispose();
+            optimizer.dispose();
+            return null;
+        }
+
+        const modelData = {
+            userEmbedding: Array.from(userEmbeddingData),
+            entityEmbedding: Array.from(entityEmbeddingData),
+            userEmbeddingShape: userEmbedding.shape,
+            entityEmbeddingShape: entityEmbedding.shape,
+            users: users || [],
+            entities: entities || [],
+            numUsers: users?.length || 0,
+            numEntities: entities?.length || 0,
+            numFactors: numFactors || 0,
+            trainedAt: new Date().toISOString()
+        };
+
+        // **FIX: Lưu vào thư mục không bị nodemon watch**
+        const modelDir = path.join(__dirname, '../data'); // Thay đổi từ models sang data
         await fs.mkdir(modelDir, { recursive: true });
-        await fs.writeFile(
-            path.join(modelDir, 'mf_model.json'),
-            JSON.stringify(modelData, null, 2)
-        );
-        console.log('✅ Mô hình Matrix Factorization đã được lưu thành công.');
+        
+        const modelPath = path.join(modelDir, 'mf_model.json');
+        await fs.writeFile(modelPath, JSON.stringify(modelData, null, 2));
+        
+        console.log('✅ Mô hình Matrix Factorization đã được lưu thành công vào data/mf_model.json.');
 
         // Lưu vào cache
-        modelCache = {
-            userEmbedding: tf.tensor(Array.from(modelData.userEmbedding), modelData.userEmbeddingShape),
-            entityEmbedding: tf.tensor(Array.from(modelData.entityEmbedding), modelData.entityEmbeddingShape),
+        mfModelCache = {
+            userEmbedding: tf.tensor(modelData.userEmbedding, modelData.userEmbeddingShape),
+            entityEmbedding: tf.tensor(modelData.entityEmbedding, modelData.entityEmbeddingShape),
             users: modelData.users,
             entities: modelData.entities,
             numUsers: modelData.numUsers,
@@ -955,77 +1141,180 @@ async function trainMatrixFactorization() {
             trainedAt: modelData.trainedAt
         };
 
-        // Cache vào Redis với TTL ngắn hơn
+        mfModelCacheTime = Date.now();
+
+        // Cache vào Redis
         try {
-            await redisClient.setex('mf_model', 1800, JSON.stringify(modelData)); // 30 phút
+            await redisClient.setex('mf_model', 1800, JSON.stringify(modelData));
+            console.log('💾 Đã cache MF model vào Redis');
         } catch (redisError) {
-            console.warn('⚠️ Không thể cache model vào Redis:', redisError.message);
+            console.warn('⚠️ Không thể cache MF model vào Redis:', redisError.message);
         }
 
+        userEmbedding.dispose();
+        entityEmbedding.dispose();
+        optimizer.dispose();
+
+        return mfModelCache;
     } catch (error) {
-        console.error('❌ Lỗi khi lưu mô hình:', error);
+        console.error('❌ Lỗi khi lưu MF model:', error);
+        userEmbedding.dispose();
+        entityEmbedding.dispose();
+        optimizer.dispose();
+        return null;
     }
-
-    // Cleanup tensors để tránh memory leak
-    userEmbedding.dispose();
-    entityEmbedding.dispose();
-
-    return modelCache;
 }
 
-// Hàm load model
+// Hàm load model MATRIX
+// **FIX: Load model với error handling tốt hơn**
 async function loadMatrixFactorizationModel() {
+    console.log('🔍 Bắt đầu load Matrix Factorization model...');
+
+    // 1. Kiểm tra memory cache trước
+    if (!shouldReloadMFModel()) {
+        console.log('✅ Sử dụng MF model từ memory cache');
+        return mfModelCache;
+    }
+
     const cacheKey = 'mf_model';
-    if (modelCache) {
-        return modelCache;
-    }
 
-    const cached = await redisClient.get(cacheKey);
-    if (cached) {
-        const modelData = JSON.parse(cached);
-        modelCache = {
-            userEmbedding: tf.tensor(Array.from(modelData.userEmbedding), modelData.userEmbeddingShape),
-            entityEmbedding: tf.tensor(Array.from(modelData.entityEmbedding), modelData.entityEmbeddingShape),
-            users: modelData.users,
-            entities: modelData.entities,
-            numFactors: modelData.numFactors
-        };
-        console.log('✅ Model loaded from Redis cache');
-        return modelCache;
-    }
-
-    const modelPath = path.join(__dirname, '../models/mf_model.json');
+    // 2. Kiểm tra Redis cache
     try {
+        console.log('🔍 Kiểm tra MF model trong Redis cache...');
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            console.log('📦 Tìm thấy MF model trong Redis cache');
+            const modelData = JSON.parse(cached);
+
+            // **FIX: Validation kỹ hơn**
+            if (!modelData.userEmbedding || !modelData.entityEmbedding ||
+                !Array.isArray(modelData.userEmbedding) || !Array.isArray(modelData.entityEmbedding) ||
+                modelData.userEmbedding.length === 0 || modelData.entityEmbedding.length === 0 ||
+                modelData.userEmbedding.some(v => isNaN(v) || !isFinite(v)) ||
+                modelData.entityEmbedding.some(v => isNaN(v) || !isFinite(v))) {
+                
+                console.error('❌ Dữ liệu Redis không hợp lệ hoặc chứa NaN, xóa cache');
+                await redisClient.del(cacheKey);
+                // **FIX: Thêm return để không tiếp tục**
+                return await loadMatrixFactorizationModel(); // Recursive call
+            }
+
+            const userTensor = tf.tensor(modelData.userEmbedding, modelData.userEmbeddingShape);
+            const entityTensor = tf.tensor(modelData.entityEmbedding, modelData.entityEmbeddingShape);
+
+            mfModelCache = {
+                userEmbedding: userTensor,
+                entityEmbedding: entityTensor,
+                users: modelData.users,
+                entities: modelData.entities,
+                numUsers: modelData.numUsers,
+                numEntities: modelData.numEntities,
+                numFactors: modelData.numFactors,
+                trainedAt: modelData.trainedAt
+            };
+
+            mfModelCacheTime = Date.now();
+            console.log('✅ MF Model loaded from Redis cache');
+            return mfModelCache;
+        }
+    } catch (redisError) {
+        console.warn('⚠️ Lỗi khi đọc MF model từ Redis cache:', redisError.message);
+    }
+
+    // 3. Kiểm tra file system - **FIX: Đổi path**
+    const modelPath = path.join(__dirname, '../data/mf_model.json'); // Thay đổi path
+    try {
+        console.log(`🔍 Kiểm tra MF model file tại: ${modelPath}`);
+
+        await fs.access(modelPath);
         const modelDataStr = await fs.readFile(modelPath, 'utf8');
         const modelData = JSON.parse(modelDataStr);
-        modelCache = {
-            userEmbedding: tf.tensor(Array.from(modelData.userEmbedding), modelData.userEmbeddingShape),
-            entityEmbedding: tf.tensor(Array.from(modelData.entityEmbedding), modelData.entityEmbeddingShape),
+
+        // **FIX: Validation kỹ hơn**
+        if (!modelData.userEmbedding || !modelData.entityEmbedding ||
+            !Array.isArray(modelData.userEmbedding) || !Array.isArray(modelData.entityEmbedding) ||
+            modelData.userEmbedding.length === 0 || modelData.entityEmbedding.length === 0 ||
+            !modelData.userEmbeddingShape || !modelData.entityEmbeddingShape ||
+            modelData.userEmbedding.some(v => isNaN(v) || !isFinite(v)) ||
+            modelData.entityEmbedding.some(v => isNaN(v) || !isFinite(v))) {
+            
+            console.error('❌ Dữ liệu file không hợp lệ hoặc chứa NaN');
+            throw new Error('Invalid model data');
+        }
+
+        // Kiểm tra shape
+        const expectedUserSize = modelData.userEmbeddingShape[0] * modelData.userEmbeddingShape[1];
+        const expectedEntitySize = modelData.entityEmbeddingShape[0] * modelData.entityEmbeddingShape[1];
+        if (modelData.userEmbedding.length !== expectedUserSize ||
+            modelData.entityEmbedding.length !== expectedEntitySize) {
+            console.error(`❌ Shape không khớp`);
+            throw new Error('Shape mismatch');
+        }
+
+        const userTensor = tf.tensor(modelData.userEmbedding, modelData.userEmbeddingShape);
+        const entityTensor = tf.tensor(modelData.entityEmbedding, modelData.entityEmbeddingShape);
+
+        mfModelCache = {
+            userEmbedding: userTensor,
+            entityEmbedding: entityTensor,
             users: modelData.users,
             entities: modelData.entities,
-            numFactors: modelData.numFactors
+            numUsers: modelData.numUsers,
+            numEntities: modelData.numEntities,
+            numFactors: modelData.numFactors,
+            trainedAt: modelData.trainedAt
         };
 
-        await redisClient.setex(cacheKey, 3600, JSON.stringify(modelData)); // Cache 1 giờ
-        console.log('✅ Model loaded from file and cached in Redis');
-        return modelCache;
-    } catch (error) {
-        console.log('⚠️ Không thể load model từ file, sẽ huấn luyện model mới');
-        return await trainMatrixFactorization();
+        mfModelCacheTime = Date.now();
+
+        // Cache vào Redis
+        try {
+            await redisClient.setex(cacheKey, 3600, JSON.stringify(modelData));
+            console.log('💾 Đã cache MF model vào Redis');
+        } catch (redisCacheError) {
+            console.warn('⚠️ Không thể cache MF model vào Redis:', redisCacheError.message);
+        }
+
+        console.log('✅ MF Model loaded from file và cached');
+        return mfModelCache;
+
+    } catch (fileError) {
+        console.log(`⚠️ Không thể load MF model từ file (${fileError.message}), sẽ huấn luyện model mới`);
+
+        // **FIX: Chỉ train nếu không phải lỗi NaN**
+        if (!fileError.message.includes('Shape mismatch') && !fileError.message.includes('NaN')) {
+            console.log('🔄 Bắt đầu huấn luyện MF model mới...');
+            const newModel = await trainMatrixFactorization();
+            if (newModel) {
+                mfModelCacheTime = Date.now();
+                console.log('✅ MF Model mới đã được huấn luyện và cached');
+            }
+            return newModel;
+        } else {
+            console.warn('⚠️ Bỏ qua huấn luyện vì dữ liệu có vấn đề, trả về null');
+            return null;
+        }
     }
 }
 
 // Hàm dự đoán gợi ý cho người dùng
+// **FIX: Hàm recommendation với timeout**
 async function getCollaborativeRecommendations(userId, sessionId, limit = 10, role = 'user') {
     const cacheKey = `recs:collab:${userId || sessionId}:${limit}:${role}`;
-    const cached = await redisClient.get(cacheKey);
-    if (cached) {
-        return JSON.parse(cached);
-    }
-
-    // Logic tính toán
+    
     try {
-        const model = await loadMatrixFactorizationModel();
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
+        // **FIX: Thêm timeout cho load model**
+        const modelPromise = loadMatrixFactorizationModel();
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Model load timeout')), 30000); // 30 giây
+        });
+
+        const model = await Promise.race([modelPromise, timeoutPromise]);
 
         if (!model) {
             console.warn('⚠️ Không có model để thực hiện recommendation');
@@ -1040,25 +1329,31 @@ async function getCollaborativeRecommendations(userId, sessionId, limit = 10, ro
             return [];
         }
 
-        // Tính điểm số cho tất cả items
+        // Tính điểm số
         const userVec = userEmbedding.slice([userIdx, 0], [1, userEmbedding.shape[1]]);
         const scores = tf.matMul(userVec, entityEmbedding, false, true).squeeze();
         const scoresArray = await scores.data();
 
-        // Lấy top
+        // **FIX: Kiểm tra NaN trong scores**
+        if (scoresArray.some(v => isNaN(v) || !isFinite(v))) {
+            console.warn('⚠️ Scores chứa NaN, bỏ qua recommendation');
+            userVec.dispose();
+            scores.dispose();
+            return [];
+        }
+
+        // Lấy top entities
         const entityScores = entities.map((entityStr, idx) => {
             const parts = entityStr.split(':');
             const type = parts[0];
             const id = parts[1];
 
-            // Kiểm tra xem id có hợp lệ không
             if (!id || id === 'undefined' || id === 'null') {
-                console.warn(`⚠️ ID không hợp lệ trong entity: ${entityStr}`);
                 return null;
             }
 
             return { entityId: id, entityType: type, score: scoresArray[idx] };
-        }).filter(item => item !== null); // Loại bỏ các item null
+        }).filter(item => item !== null);
 
         // Lọc theo vai trò
         let filteredEntities = entityScores;
@@ -1068,28 +1363,22 @@ async function getCollaborativeRecommendations(userId, sessionId, limit = 10, ro
             filteredEntities = entityScores.filter(e => ['product', 'post', 'user'].includes(e.entityType));
         }
 
-        // Sắp xếp và lấy top
         const topEntities = filteredEntities
             .sort((a, b) => b.score - a.score)
             .slice(0, limit)
             .map(e => ({ id: e.entityId, type: e.entityType }));
 
-        // Cleanup tensors
         userVec.dispose();
         scores.dispose();
 
-        // Lấy thông tin chi tiết - KIỂM TRA ID TRƯỚC KHI QUERY
+        // Fetch thông tin chi tiết
         const result = [];
         for (const entity of topEntities) {
-            // Kiểm tra ObjectId hợp lệ
             if (!entity.id || entity.id === 'undefined' || entity.id === 'null') {
-                console.warn(`⚠️ Bỏ qua entity với ID không hợp lệ:`, entity);
                 continue;
             }
 
-            // Kiểm tra định dạng ObjectId (24 ký tự hex)
             if (!/^[0-9a-fA-F]{24}$/.test(entity.id)) {
-                console.warn(`⚠️ ID không đúng định dạng ObjectId: ${entity.id}`);
                 continue;
             }
 
@@ -1127,8 +1416,9 @@ async function getCollaborativeRecommendations(userId, sessionId, limit = 10, ro
             }
         }
 
-        await redisClient.setex(cacheKey, 3600, JSON.stringify(result)); // Cache 1 giờ
+        await redisClient.setex(cacheKey, 3600, JSON.stringify(result));
         return result;
+
     } catch (error) {
         console.error('❌ Lỗi trong getCollaborativeRecommendations:', error);
         return [];
@@ -1248,10 +1538,10 @@ async function getContentBasedRecommendations(itemId, itemType = 'product', limi
                     if (product) result.push({ ...product, type: 'product' });
                 } else if (itemType === 'flashsale') {
                     const flashSale = await FlashSale.findById(itemId)
-                        .select('name description hashtags products startTime endTime')
+                        .select('name slug description hashtags products startTime endTime')
                         .populate({
                             path: 'products.product',
-                            select: 'name mainCategory price hashtags'
+                            select: 'name mainCategory price hashtags slug images'
                         })
                         .lean();
                     if (flashSale) result.push({ ...flashSale, type: 'flashsale' });
@@ -1470,7 +1760,11 @@ async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'u
         if ((!collaborativeRecs || collaborativeRecs.length === 0) &&
             (!contentBasedItems || contentBasedItems.length === 0)) {
             console.log('⚠️ Không có gợi ý từ cả hai phương pháp, fallback ngay');
-            return await getFallbackRecommendations(role, limit);
+            const fallbackResult = await getFallbackRecommendations(role, limit);
+            if (fallbackResult.length > 0) {
+                await redisClient.setex(cacheKey, 1800, JSON.stringify(fallbackResult));
+            }
+            return fallbackResult;
         }
 
         // 4. Nếu chỉ có collaborative recs và đủ số lượng, trả về luôn
@@ -1516,7 +1810,11 @@ async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'u
         // 6. Nếu vẫn không có gợi ý nào, fallback
         if (scoreMap.size === 0) {
             console.log('⚠️ Không có điểm số nào, fallback về popular items');
-            return await getFallbackRecommendations(role, limit);
+            const fallbackResult = await getFallbackRecommendations(role, limit);
+            if (fallbackResult.length > 0) {
+                await redisClient.setex(cacheKey, 1800, JSON.stringify(fallbackResult));
+            }
+            return fallbackResult;
         }
 
         // 7. Sắp xếp theo điểm số và lấy top items
@@ -1572,7 +1870,11 @@ async function getHybridRecommendations(userId, sessionId, limit = 10, role = 'u
         // Fallback error handling
         try {
             console.log('🔄 Fallback do lỗi trong hybrid recommendations...');
-            return await getFallbackRecommendations(role, limit);
+            const fallbackResult = await getFallbackRecommendations(role, limit);
+            if (fallbackResult.length > 0) {
+                await redisClient.setex(cacheKey, 1800, JSON.stringify(fallbackResult));
+            }
+            return fallbackResult;
         } catch (fallbackError) {
             console.error('❌ Lỗi fallback:', fallbackError);
             return []; // Trả về array rỗng thay vì throw error
@@ -1644,7 +1946,7 @@ async function fetchDetailedRecommendations(scoredItems, role) {
                 _id: { $in: itemsByType.user.map(i => i.itemId) },
                 isActive: true
             })
-                .select('fullName avatar bio')
+                .select('fullName avatar coverImage slug bio')
                 .lean()
                 .then(async users => {
                     const usersWithStats = await Promise.all(
@@ -1670,7 +1972,7 @@ async function fetchDetailedRecommendations(scoredItems, role) {
                 'status.isActive': true,
                 'status.isApprovedCreate': true
             })
-                .select('name avatar description stats')
+                .select('name avatar coverImage slug description stats')
                 .lean()
                 .then(shops => shops.map(s => ({ ...s, type: 'shop' })))
         );
@@ -1737,7 +2039,7 @@ async function getFallbackRecommendations(role, limit) {
                     .lean(),
                 User.find({ isActive: true })
                     .sort({ createdAt: -1 })
-                    .select('fullName avatar bio')
+                    .select('fullName avatar coverImage slug bio')
                     .limit(Math.ceil(limit * 0.4))
                     .lean()
             ]);
@@ -1773,6 +2075,8 @@ async function getFallbackRecommendations(role, limit) {
         return [];
     }
 }
+
+//////////////////////
 
 // Hàm lấy gợi ý Flash Sale và sản phẩm bên trong
 async function getFlashSaleRecommendations(userId, sessionId, limit = 10, role = 'user') {
@@ -1814,10 +2118,10 @@ async function getFlashSaleRecommendations(userId, sessionId, limit = 10, role =
                 'products.product': { $in: Array.from(purchasedProducts) },
                 isActive: true
             })
-                .select('name description products startTime endTime')
+                .select('name slug description products startTime endTime')
                 .populate({
                     path: 'products.product',
-                    select: 'name mainCategory price hashtags'
+                    select: 'name mainCategory price hashtags slug images'
                 })
                 .lean();
 
@@ -2170,6 +2474,44 @@ async function debugGetHybridRecommendations(userId, sessionId, limit = 10, role
     }
 }
 
+/////////////// CLEARRRRRR
+// Thêm hàm để clear cache khi cần (modelCache)
+function clearModelCache() {
+    if (modelCache) {
+        // Dispose tensors to free memory
+        if (modelCache.userEmbedding) modelCache.userEmbedding.dispose();
+        if (modelCache.entityEmbedding) modelCache.entityEmbedding.dispose();
+        modelCache = null;
+        modelCacheTime = null;
+        console.log('✅ Model cache cleared');
+    }
+}
+
+// Thêm hàm để clear cache khi cần (mdModelCache)
+function clearMFModelCache() {
+    console.log('🗑️ Clearing MF Model cache...');
+
+    if (mfModelCache) {
+        if (mfModelCache.userEmbedding) mfModelCache.userEmbedding.dispose();
+        if (mfModelCache.entityEmbedding) mfModelCache.entityEmbedding.dispose();
+    }
+
+    mfModelCache = null;
+    mfModelCacheTime = null;
+    console.log('✅ MF Model cache cleared');
+}
+
+//Clear cả 2
+function clearAllModelCache() {
+    clearModelCache();
+    clearMFModelCache();
+    console.log('✅ All model caches cleared');
+}
+
+// Xóa cache Redis
+// redis-cli DEL mf_model
+// redis-cli flushall
+
 module.exports = {
     prepareUserEntityMatrix,
     trainUserShopModel,
@@ -2185,5 +2527,9 @@ module.exports = {
     getFlashSaleRecommendations,
 
     debugGetCollaborativeRecommendations,
-    debugGetHybridRecommendations
+    debugGetHybridRecommendations,
+
+    clearModelCache,
+    clearMFModelCache,
+    clearAllModelCache,
 };

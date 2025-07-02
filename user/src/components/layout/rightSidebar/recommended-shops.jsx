@@ -4,12 +4,15 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader } from "../../../components/ui/card"
 import { Button } from "../../../components/ui/button"
 import { Badge } from "../../../components/ui/badge"
-import { Store, Star, ArrowRight, Crown, Heart, Users, ChevronUp, Loader2 } from "lucide-react"
+import { Store, Star, ArrowRight, Crown, Heart, Users, ChevronUp, Loader2, UserCheck, UserPlus } from "lucide-react"
 import { Skeleton } from "../../../components/ui/skeleton"
 import { useAuth } from "../../../contexts/AuthContext"
 import { useNavigate } from "react-router-dom"
 import { cn } from "../../../lib/utils"
 import { getRecommendedShops, getRecommendedShopsCaseLogin } from "../../../services/recommendationService"
+import { useFollow } from "../../../contexts/FollowContext";
+import { toggleFollow } from "../../../services/followService"
+import { toast } from "sonner"
 
 export default function RecommendedShops() {
     const [shops, setShops] = useState([])
@@ -19,7 +22,10 @@ export default function RecommendedShops() {
     const [currentPage, setCurrentPage] = useState(1)
     const [hasMoreData, setHasMoreData] = useState(true)
     const [isExpanded, setIsExpanded] = useState(false)
-    const { isAuthenticated } = useAuth()
+    const { isAuthenticated, user, setShowLoginModal } = useAuth()
+    const { getFollowStatus, updateFollowStatus } = useFollow()
+    const [followStates, setFollowStates] = useState({}) // {shopId: isFollowing}
+    const [followLoading, setFollowLoading] = useState({}) // {shopId: isLoading}
     const navigate = useNavigate()
 
     const ITEMS_PER_PAGE = 5
@@ -27,6 +33,34 @@ export default function RecommendedShops() {
     useEffect(() => {
         fetchRecommendedShops(1, true) // Reset data when auth changes
     }, [isAuthenticated])
+
+    useEffect(() => {
+        const checkFollowStatus = async () => {
+            if (!user || shops.length === 0) return
+
+            const followStatesTemp = {}
+
+            for (const shop of shops) {
+                // Tránh follow chính mình nếu user cũng là seller
+                if (user._id === shop._id) {
+                    followStatesTemp[shop._id] = false
+                    continue
+                }
+
+                try {
+                    const isFollowing = await getFollowStatus(shop._id, "shop")
+                    followStatesTemp[shop._id] = isFollowing
+                } catch (err) {
+                    console.error("Lỗi kiểm tra trạng thái follow:", err)
+                    followStatesTemp[shop._id] = false
+                }
+            }
+
+            setFollowStates(followStatesTemp)
+        }
+
+        checkFollowStatus()
+    }, [shops, isAuthenticated, getFollowStatus])
 
     const fetchRecommendedShops = async (page = 1, isInitial = false) => {
         try {
@@ -103,16 +137,56 @@ export default function RecommendedShops() {
     }
 
     const handleShopClick = (shop) => {
-        navigate(`/shops/${shop.slug || shop._id}`)
+        navigate(`/feed/profile/${shop.slug || shop._id}`)
     }
 
     const handleViewAllShops = () => {
-        navigate("/shops/recommended")
+        navigate("/marketplace/shop-recommendation")
     }
 
-    const handleFollowShop = (e, shop) => {
+    const handleFollowShop = async (e, shop) => {
         e.stopPropagation()
-        console.log("Theo dõi cửa hàng:", shop.name)
+
+        if (!isAuthenticated) return setShowLoginModal(true);
+        if (user && user._id === shop._id) return;
+
+        const shopId = shop._id
+
+        // Tránh spam click
+        if (followLoading[shopId]) return
+
+        setFollowLoading(prev => ({ ...prev, [shopId]: true }))
+
+        try {
+            const res = await toggleFollow({
+                targetId: shopId,
+                targetType: "shop"
+            })
+
+            const newFollowStatus = res.data.isFollowing
+
+            // Cập nhật state local
+            setFollowStates(prev => ({ ...prev, [shopId]: newFollowStatus }))
+
+            // Cập nhật cache
+            updateFollowStatus(shopId, "shop", newFollowStatus)
+
+            toast.success(
+                newFollowStatus ? "Đã theo dõi" : "Đã bỏ theo dõi",
+                {
+                    description: newFollowStatus
+                        ? `Bạn đã theo dõi ${shop.name}`
+                        : `Bạn đã bỏ theo dõi ${shop.name}`
+                }
+            )
+        } catch (err) {
+            console.error("Lỗi toggle follow:", err)
+            toast.error("Có lỗi xảy ra", {
+                description: "Không thể thực hiện hành động này"
+            })
+        } finally {
+            setFollowLoading(prev => ({ ...prev, [shopId]: false }))
+        }
     }
 
     const handleToggleFavorite = (e, shop) => {
@@ -250,22 +324,37 @@ export default function RecommendedShops() {
                                             )}
                                         </div>
 
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex items-center gap-1">
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                className="h-7 w-7 p-0 hover:bg-red-50 hover:text-red-500"
+                                                className="h-7 w-7 p-0 hover:bg-red-50 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                                                 onClick={(e) => handleToggleFavorite(e, shop)}
                                             >
                                                 <Heart className="w-3 h-3" />
                                             </Button>
                                             <Button
-                                                variant="ghost"
+                                                variant={followStates[shop._id] ? "outline" : "default"}
                                                 size="sm"
-                                                className="h-7 px-2 text-xs hover:bg-pink-50 hover:text-pink-600"
+                                                className={cn(
+                                                    "h-7 px-3 text-xs transition-all",
+                                                    followStates[shop._id]
+                                                        ? "border-pink-200 text-pink-600 hover:bg-pink-50"
+                                                        : "bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white",
+                                                )}
                                                 onClick={(e) => handleFollowShop(e, shop)}
+                                                disabled={followLoading[shop._id]}
                                             >
-                                                Theo dõi
+                                                {followLoading[shop._id] ? (
+                                                    <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-1" />
+                                                ) : followStates[shop._id] ? (
+                                                    "Đã theo dõi"
+                                                ) : (
+                                                    <>
+                                                        <UserPlus className="w-3 h-3 mr-1" />
+                                                        Theo dõi
+                                                    </>
+                                                )}
                                             </Button>
                                         </div>
                                     </div>

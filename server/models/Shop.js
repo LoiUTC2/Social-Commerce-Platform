@@ -108,6 +108,8 @@ const shopSchema = new mongoose.Schema({
             }
         },
         followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+        followersCount: { type: Number, default: 0 },
+        followingCount: { type: Number, default: 0 },
         views: { type: Number, default: 0 },
         orderCount: { type: Number, default: 0 },
         revenue: { type: Number, default: 0 },

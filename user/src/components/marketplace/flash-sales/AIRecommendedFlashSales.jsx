@@ -186,7 +186,7 @@ const AIRecommendedFlashSales = () => {
                         <div>
                             <div className="flex items-center gap-2 mb-1">
                                 <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-                                    Gợi ý dành cho bạn
+                                    Gợi ý khuyến mãi dành cho bạn ngay lúc này
                                 </h2>
                                 <Badge className="bg-gradient-to-r from-purple-500 to-blue-500 text-white border-0">
                                     <Sparkles className="w-3 h-3 mr-1" />

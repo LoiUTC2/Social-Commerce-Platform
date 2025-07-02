@@ -10,6 +10,8 @@ import SuggestedProductsPage from '../pages/marketplace/placeMarketProduct/Sugge
 import LatestProductsPage from '../pages/marketplace/placeMarketProduct/LatestProductsPage';
 import FlashSalesPage from '../pages/marketplace/placeMarketFlashSale/FlashSalesPage';
 import AIFlashSaleRecommendationsPage from '../pages/marketplace/placeMarketFlashSale/AIFlashSaleRecommendationsPage';
+import ShopRecommendationsPage from '..//pages/marketplace/placeMarketShop/ShopRecommendationsPage';
+import FeaturedShopsPage from '../pages/marketplace/placeMarketShop/FeaturedShopsPage';
 
 const MarketplaceRoutes = (
   <Route path="/marketplace" element={<MainLayout />}>
@@ -22,6 +24,8 @@ const MarketplaceRoutes = (
     <Route path="/marketplace/latest-products" element={<LatestProductsPage />} />
     <Route path="/marketplace/flash-sales" element={<FlashSalesPage />} />
     <Route path="/marketplace/flash-sales-recommendation" element={<AIFlashSaleRecommendationsPage />} />
+    <Route path="/marketplace/shop-recommendation" element={<ShopRecommendationsPage />} />
+    <Route path="/marketplace/shop-featured" element={<FeaturedShopsPage />} />
   </Route>
 );
 

@@ -2,8 +2,8 @@ import axios from 'axios';
 import { toast } from 'sonner';
 
 const api = axios.create({
-    // baseURL: 'http://localhost:5000/api', // hoặc domain backend của bạn
-    baseURL: 'http://192.168.1.88:5000/api', // hoặc domain backend của bạn
+    baseURL: 'http://localhost:5000/api', // hoặc domain backend của bạn
+    // baseURL: 'http://192.168.1.19:5000/api', // hoặc domain backend của bạn
     withCredentials: true, // QUAN TRỌNG: để nhận cookie (access, refresh token)
 });
 

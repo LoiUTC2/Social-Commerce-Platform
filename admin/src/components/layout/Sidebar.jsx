@@ -24,6 +24,7 @@ import {
     FiChevronRight,
     FiStore,
     FiTrash2,
+    FiTag,
 } from "react-icons/fi"
 import { Button } from "../ui/button"
 import { Badge } from "../ui/badge"
@@ -55,6 +56,7 @@ const Sidebar = ({ collapsed, onToggle }) => {
                 { path: "/admin/stores", icon: FiShoppingBag, label: "Gian hàng", badge: "1.2K" },
                 { path: "/admin/products", icon: FiPackage, label: "Sản phẩm", badge: null },
                 { path: "/admin/posts", icon: FiEdit3, label: "Bài viết", badge: null },
+                { path: "/admin/categories", icon: FiTag, label: "Danh mục", badge: "17" },
             ],
         },
         {

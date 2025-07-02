@@ -22,7 +22,7 @@ app.locals.socketHandler = socketHandler
 
 // app.use(cors());
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://192.168.1.88:3000', 'http://localhost:3001', 'http://192.168.1.88:3001'], // Mảng các địa chỉ được phép
+  origin: ['http://localhost:3000', 'http://192.168.1.19:3000', 'http://localhost:3001', 'http://192.168.1.19:3001'], // Mảng các địa chỉ được phép
   credentials: true, // QUAN TRỌNG để gửi cookie
 }));
 
@@ -34,13 +34,13 @@ app.use(cookieParser());
 // Cấu hình session
 app.use(session({
   secret: process.env.SESSION_SECRET || 'your-secret-key',
-  resave: false,
-  saveUninitialized: true,
+  resave: false,  //Session chỉ được lưu lại nếu có thay đổi (ví dụ: thêm dữ liệu vào req.session, như req.session.user = { id: 1 }). Nếu không có thay đổi, session không được ghi lại vào MongoDB
+  saveUninitialized: true, //Một session mới sẽ được tạo và lưu vào MongoDB ngay cả khi chưa có dữ liệu
   store: MongoStore.create({
     mongoUrl: process.env.MONGO_URI,
     collectionName: 'sessions'
   }),
-  cookie: {
+  cookie: {  //Session ID được lưu trong cookie trên trình duyệt
     maxAge: 24 * 60 * 60 * 1000, // 24 giờ
     secure: process.env.NODE_ENV === 'production', // Chỉ dùng secure trong production
     sameSite: 'strict'

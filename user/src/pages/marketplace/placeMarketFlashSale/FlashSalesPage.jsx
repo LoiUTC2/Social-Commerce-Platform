@@ -12,7 +12,10 @@ import {
     getEndedFlashSales,
     searchFlashSales,
 } from "../../../services/flashSaleService"
+import { getFlashSaleForUser } from "../../../services/flashSaleService"
 import { Search, Filter, Clock, FlameIcon as Fire, CheckCircle } from "lucide-react"
+import FlashSaleDetailModal from "../../../components/marketplace/flash-sales/FlashSaleDetailModal"
+
 
 const FlashSalesPage = () => {
     const [activeTab, setActiveTab] = useState("active")
@@ -32,6 +35,10 @@ const FlashSalesPage = () => {
         upcoming: { page: 1, totalPages: 1 },
         ended: { page: 1, totalPages: 1 },
     })
+
+    const [selectedFlashSale, setSelectedFlashSale] = useState(null)
+    const [modalOpen, setModalOpen] = useState(false)
+    const [modalLoading, setModalLoading] = useState(false)
 
     useEffect(() => {
         fetchFlashSales()
@@ -88,6 +95,24 @@ const FlashSalesPage = () => {
         }
     }
 
+    const handleViewDetail = async (flashSale) => {
+        setSelectedFlashSale(flashSale)
+        setModalOpen(true)
+
+        // Nếu cần fetch thêm data chi tiết cho modal
+        if (!flashSale.enrichedProducts) {
+            setModalLoading(true)
+            try {
+                const detailData = await getFlashSaleForUser(flashSale._id)
+                setSelectedFlashSale(detailData)
+            } catch (err) {
+                console.error("Error fetching flash sale detail:", err)
+            } finally {
+                setModalLoading(false)
+            }
+        }
+    }
+
     return (
         <div className="container mx-auto px-4 py-8">
             {/* Header */}
@@ -137,22 +162,30 @@ const FlashSalesPage = () => {
                 </TabsList>
 
                 <TabsContent value="active" className="mt-6">
-                    <FlashSaleGrid flashSales={flashSales.active} loading={loading.active} type="active" />
+                    <FlashSaleGrid flashSales={flashSales.active} loading={loading.active} type="active" onViewDetail={handleViewDetail} />
                 </TabsContent>
 
                 <TabsContent value="upcoming" className="mt-6">
-                    <FlashSaleGrid flashSales={flashSales.upcoming} loading={loading.upcoming} type="upcoming" />
+                    <FlashSaleGrid flashSales={flashSales.upcoming} loading={loading.upcoming} type="upcoming" onViewDetail={handleViewDetail} />
                 </TabsContent>
 
                 <TabsContent value="ended" className="mt-6">
-                    <FlashSaleGrid flashSales={flashSales.ended} loading={loading.ended} type="ended" />
+                    <FlashSaleGrid flashSales={flashSales.ended} loading={loading.ended} type="ended" onViewDetail={handleViewDetail} />
                 </TabsContent>
             </Tabs>
+
+            {/* Flash Sale Detail Modal */}
+            <FlashSaleDetailModal
+                flashSale={selectedFlashSale}
+                open={modalOpen}
+                onOpenChange={setModalOpen}
+                loading={modalLoading}
+            />
         </div>
     )
 }
 
-const FlashSaleGrid = ({ flashSales, loading, type }) => {
+const FlashSaleGrid = ({ flashSales, loading, type , onViewDetail }) => {
     if (loading) {
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -195,13 +228,13 @@ const FlashSaleGrid = ({ flashSales, loading, type }) => {
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {flashSales.map((flashSale) => (
-                <FlashSaleCard key={flashSale._id} flashSale={flashSale} type={type} />
+                <FlashSaleCard key={flashSale._id} flashSale={flashSale} type={type} onViewDetail={onViewDetail} />
             ))}
         </div>
     )
 }
 
-const FlashSaleCard = ({ flashSale, type }) => {
+const FlashSaleCard = ({ flashSale, type, onViewDetail }) => {
     // Reuse the FlashSaleCard component from the main FlashSale component
     // This would be the same component we created above
     return (
@@ -227,7 +260,10 @@ const FlashSaleCard = ({ flashSale, type }) => {
                         </div>
                     </div>
 
-                    <Button className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white">
+                    <Button
+                        className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white"
+                        onClick={() => onViewDetail(flashSale)} // Thêm onClick handler
+                    >
                         Xem chi tiết
                     </Button>
                 </div>

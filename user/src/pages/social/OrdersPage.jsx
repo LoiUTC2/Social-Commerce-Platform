@@ -359,8 +359,8 @@ export default function OrdersPage() {
                                                     <p className="text-sm text-gray-500">Đặt lúc: {formatDate(order.createdAt)}</p>
                                                     {order.shop && (
                                                         <p
-                                                            className="text-sm text-blue-600 hover:text-blue-800 cursor-pointer"
-                                                            onClick={() => navigate(`/shop/${order.shop.slug}`)}
+                                                            className="text-sm text-pink-600 hover:text-pink-800 cursor-pointer"
+                                                            onClick={() => navigate(`/feed/profile/${order.shop?.slug}`)}
                                                         >
                                                             Shop: {order.shop.name}
                                                         </p>
@@ -376,7 +376,7 @@ export default function OrdersPage() {
                                         {/* Order Items */}
                                         <div className="space-y-3 mb-4">
                                             {order.items?.slice(0, 2).map((item, index) => (
-                                                <div key={index} className="flex gap-3 items-center">
+                                                <div key={index} className="flex gap-3 items-center hover:text-pink-800 cursor-pointer" onClick={() => navigate(`/marketplace/products/${item.product?.slug}`)}> 
                                                     <img
                                                         src={item.product?.images?.[0] || "/placeholder.svg?height=60&width=60"}
                                                         alt={item.product?.name}

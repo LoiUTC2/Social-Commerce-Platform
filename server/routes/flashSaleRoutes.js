@@ -6,6 +6,8 @@ const controller = require('../controllers/flashSaleController');
 
 // CRUD operations
 router.post('/', verifyToken, setActor, ensureSessionId, requireRole(['seller', 'admin']), controller.createFlashSale);
+// router.post('/', controller.createFlashSale); // hàm chạy RUNNER
+
 router.put('/:id', verifyToken, setActor, ensureSessionId, controller.updateFlashSale);
 router.delete('/:id/soft', verifyToken, setActor, ensureSessionId, controller.softDeleteFlashSale);
 router.delete('/:id/hard', verifyToken, setActor, ensureSessionId, controller.hardDeleteFlashSale);

@@ -48,11 +48,28 @@ export const searchAll = async ({ q, hashtag, categoryId, limit = 5 }) => {
     return res.data;
 };
 
-// 🧠 Lấy từ khóa tìm kiếm phổ biến
-export const getPopularSearches = async (limit = 10, timeRange = '7d') => {
-    const res = await api.get('/search/popular', {
-        params: { limit, timeRange },
-    });
+// 🧠 Lấy từ khóa tìm kiếm phổ biến với phân trang
+export const getPopularSearches = async (options = {}) => {
+    const {
+        limit = 10,
+        timeRange = '7d',
+        page = 1,
+        offset
+    } = options;
+
+    const params = { 
+        limit, 
+        timeRange 
+    };
+    
+    // Ưu tiên offset nếu có, không thì dùng page
+    if (offset !== undefined) {
+        params.offset = offset;
+    } else {
+        params.page = page;
+    }
+
+    const res = await api.get('/search/popular', { params });
     return res.data;
 };
 

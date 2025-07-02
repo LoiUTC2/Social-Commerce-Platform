@@ -71,7 +71,7 @@ const userInteractionSchema = new mongoose.Schema({
       'like', 'unlike', 'comment', 'share', 'click', 'view', 'save', 'unsave', 'care', 'uncare',
       'add_to_cart', 'update_cart_item', 'remove_cart_item', 'remove_multiple_cart_items', 'clear_cart', 'clean_cart',
       'purchase', 'review', 'reply', 'report', 'follow', 'unfollow', 'search',
-      'create', 'update', 'delete', 'toggle_status', 'toggle_allow_posts'
+      'create', 'update', 'delete', 'toggle_status', 'toggle_allow_posts', 'feed_impression',
     ],
     required: true
   },
@@ -110,7 +110,7 @@ const userInteractionSchema = new mongoose.Schema({
     // }
   },
 
-  //Nội dung search
+  //Nội dung search ///////////////
   searchSignature: {
     query: String,
     category: String,
@@ -160,7 +160,8 @@ const getActionWeight = (action) => {
     'clean_cart': -3,
     'click': 2,
     'reply': 3,
-    'report': 0
+    'report': 0,
+    'feed_impression': 0.5
   };
   return actionWeights[action] || 0;
 };
@@ -337,5 +338,14 @@ userInteractionSchema.index({
   name: 'interaction_dedup_index',
   sparse: true // Chỉ index các document có searchSignature
 }); // Index cho việc tìm duplicate
+
+userInteractionSchema.index({
+  targetType: 1,
+  action: 1,
+  sessionId: 1,
+  targetId: 1
+}, {
+  name: 'feed_impression_index'
+});
 
 module.exports = mongoose.model('UserInteraction', userInteractionSchema);

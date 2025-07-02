@@ -54,7 +54,9 @@ exports.updateCategory = async (req, res) => {
         // Cập nhật thông tin
         const updated = await Category.findByIdAndUpdate(
             categoryId,
-            { ...req.body, updatedBy: req.user.userId },
+            // { ...req.body, updatedBy: req.user.userId },
+            { ...req.body},
+
             { new: true, runValidators: true }
         );
 

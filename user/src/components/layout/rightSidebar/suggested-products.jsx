@@ -46,11 +46,11 @@ export default function SuggestedProducts() {
     }
 
     const handleProductClick = (productId, productSlug) => {
-        navigate(`/products/${productSlug || productId}`)
+        navigate(`/marketplace/products/${productSlug || productId}`)
     }
 
     const handleViewMore = () => {
-        navigate("/products/suggested")
+        navigate("/marketplace/suggested-products")
     }
 
     const handleAddToCart = (e, product) => {
@@ -191,18 +191,18 @@ export default function SuggestedProducts() {
                                     </div>
 
                                     {/* Shop Info */}
-                                    {product.seller && (
+                                    {/* {product.seller && (
                                         <div className="mt-2 flex items-center gap-2">
                                             <img
                                                 src={product.seller.avatar || `/placeholder.svg?height=16&width=16`}
-                                                alt={product.seller.shopName || product.seller.username}
+                                                alt={product.seller.name || product.seller.username}
                                                 className="w-4 h-4 rounded-full object-cover border border-pink-100"
                                             />
                                             <span className="text-xs text-gray-500 truncate">
-                                                {product.seller.shopName || product.seller.username}
+                                                {product.seller.name || product.seller.username}
                                             </span>
                                         </div>
-                                    )}
+                                    )} */}
                                 </div>
                             ))}
                         </div>

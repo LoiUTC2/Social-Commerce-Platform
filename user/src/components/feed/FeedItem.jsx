@@ -26,6 +26,8 @@ import { toggleSavePost, checkSavedPost } from "../../services/savedPostService"
 import { useAuth } from "../../contexts/AuthContext"
 import { useFollow } from "../../contexts/FollowContext";
 
+import { useVideoIntersection } from '../../hooks/useVideoIntersection'; //video chỉ phát khi feedItem xuất hiện trên viewport và dừng khi ra khỏi viewport
+
 export default function FeedItem({ post }) {
   const {
     _id,
@@ -70,6 +72,8 @@ export default function FeedItem({ post }) {
   const isSharedPost = post.type === "share" && sharedPost
   const postToShare = isSharedPost ? sharedPost : post
   const postIdToShare = postToShare._id
+
+  const { elementRef: feedItemRef, isVisible } = useVideoIntersection();
 
   // Xử lý media từ bài viết và sản phẩm (không bao gồm sharedPost)
   const getDisplayMedia = () => {
@@ -314,7 +318,7 @@ export default function FeedItem({ post }) {
   }
 
   const handleGetLikeList = async () => {
-    if (!user) return setShowLoginModal(true)
+    // if (!user) return setShowLoginModal(true)
     try {
       const res = await getPostLikes(_id)
       const likesData = res.data || []
@@ -327,7 +331,7 @@ export default function FeedItem({ post }) {
   }
 
   const handleComment = () => {
-    if (!user) return setShowLoginModal(true)
+    // if (!user) return setShowLoginModal(true)
     setOpenComment(true)
   }
 
@@ -344,7 +348,7 @@ export default function FeedItem({ post }) {
   }
 
   const handleGetShareList = async () => {
-    if (!user) return setShowLoginModal(true)
+    // if (!user) return setShowLoginModal(true)
     try {
       const res = await getPostShares(_id)
       const sharesData = res.data.shares || []
@@ -362,352 +366,355 @@ export default function FeedItem({ post }) {
   }
 
   return (
-    <Card className="mb-6 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
-      <CardContent className="p-0">
-        {/* Header */}
-        <div className="p-4 pb-3">
-          <div className="flex justify-between items-start">
-            <div className="flex items-center gap-3 flex-1">
-              <div className="relative">
-                <img
-                  src={avatarAuthor || "/placeholder.svg?height=40&width=40"}
-                  className="rounded-full w-10 h-10 object-cover cursor-pointer ring-2 ring-gray-100"
-                  onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}
-                  alt="Profile"
-                />
-                {author?.type === "Shop" && (
-                  <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full p-1">
-                    <ShoppingCart className="w-3 h-3 text-white" />
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p
-                    className="font-semibold text-gray-900 cursor-pointer hover:underline truncate"
-                    onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}
-                  >
-                    {nameAuthor || "Người dùng"}
-                  </p>
-                  {author?.type === "Shop" && (
-                    <Badge variant="secondary" className="text-xs flex-shrink-0">
-                      Shop
-                    </Badge>
-                  )}
-
-                  {/* Nút Follow - chỉ hiển thị khi user đã login và không phải chính mình */}
-                  {user && user._id !== author?._id?._id && (
-                    <Button
-                      onClick={handleToggleFollow}
-                      disabled={followLoading}
-                      size="sm"
-                      variant={isFollowing ? "secondary" : "default"}
-                      className={`ml-2 h-7 px-3 text-xs flex-shrink-0 ${isFollowing
-                        ? "bg-gray-100 hover:bg-gray-200 text-gray-700"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                        }`}
-                    >
-                      {followLoading ? (
-                        <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-1" />
-                      ) : isFollowing ? (
-                        <UserCheck className="w-3 h-3 mr-1" />
-                      ) : (
-                        <UserPlus className="w-3 h-3 mr-1" />
-                      )}
-                      {followLoading ? "..." : isFollowing ? "Đang theo dõi" : "Theo dõi"}
-                    </Button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="cursor-pointer hover:text-gray-700">
-                          {timePosted}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {format(new Date(createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", { locale: vi })}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                  <span className="text-gray-300">•</span>
-                  <TooltipProvider>{renderPrivacyIcon(post?.privacy)}</TooltipProvider>
-                </div>
-              </div>
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem>Quan tâm</DropdownMenuItem>
-                <DropdownMenuItem>Không quan tâm</DropdownMenuItem>
-                <DropdownMenuItem>Ẩn bài viết</DropdownMenuItem>
-
-                <DropdownMenuItem
-                  onClick={handleToggleSave}
-                  disabled={saveLoading}
-                  className="flex items-center gap-2"
-                >
-                  {saveLoading ? (
-                    <div className="w-4 h-4 border border-current border-t-transparent rounded-full animate-spin" />
-                  ) : isSaved ? (
-                    <BookmarkCheck className="w-4 h-4" />
-                  ) : (
-                    <Bookmark className="w-4 h-4" />
-                  )}
-                  {saveLoading ? "Đang xử lý..." : isSaved ? "Bỏ lưu bài viết" : "Lưu bài viết"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-
-        {/* Nội dung bài viết */}
-        {content && (
-          <div className="px-4 pb-3" onClick={() => navigate(`/feed/post/${post._id}`)}>
-            <p className="text-gray-900 whitespace-pre-line leading-relaxed cursor-pointer">{content}</p>
-          </div>
-        )}
-
-        {/* Bài viết được chia sẻ */}
-        {isSharedPost && sharedPost && (
-          <div className="mx-4 mb-3 border rounded-xl overflow-hidden bg-gray-50/50">
-            {/* Header của bài viết gốc */}
-            <div className="p-4 pb-3 bg-white">
-              <div className="flex items-center gap-3">
+    <div ref={feedItemRef}>
+      <Card className="mb-6 overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
+        <CardContent className="p-0">
+          {/* Header */}
+          <div className="p-4 pb-3">
+            <div className="flex justify-between items-start">
+              <div className="flex items-center gap-3 flex-1">
                 <div className="relative">
                   <img
-                    src={sharedPost.author?._id?.avatar || "/placeholder.svg?height=32&width=32"}
-                    className="w-8 h-8 rounded-full object-cover cursor-pointer ring-2 ring-gray-100"
-                    onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
-                    alt="Original author"
+                    src={avatarAuthor || "/placeholder.svg?height=40&width=40"}
+                    className="rounded-full w-10 h-10 object-cover cursor-pointer ring-2 ring-gray-100"
+                    onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}
+                    alt="Profile"
                   />
-                  {sharedPost.author?.type === "Shop" && (
-                    <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full p-0.5">
-                      <ShoppingCart className="w-2 h-2 text-white" />
+                  {author?.type === "Shop" && (
+                    <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full p-1">
+                      <ShoppingCart className="w-3 h-3 text-white" />
                     </div>
                   )}
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <p
-                      className="font-medium text-sm cursor-pointer hover:underline"
-                      onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
+                      className="font-semibold text-gray-900 cursor-pointer hover:underline truncate"
+                      onClick={() => navigate(`/feed/profile/${author?._id?.slug}`)}
                     >
-                      {sharedPost.author?._id?.fullName || sharedPost.author?._id?.name || "Người dùng"}
+                      {nameAuthor || "Người dùng"}
                     </p>
-                    {sharedPost.author?.type === "Shop" && (
-                      <Badge variant="secondary" className="text-xs">
+                    {author?.type === "Shop" && (
+                      <Badge variant="secondary" className="text-xs flex-shrink-0">
                         Shop
                       </Badge>
                     )}
+
+                    {/* Nút Follow - chỉ hiển thị khi user đã login và không phải chính mình */}
+                    {user && user._id !== author?._id?._id && (
+                      <Button
+                        onClick={handleToggleFollow}
+                        disabled={followLoading}
+                        size="sm"
+                        variant={isFollowing ? "secondary" : "default"}
+                        className={`ml-2 h-7 px-3 text-xs flex-shrink-0 ${isFollowing
+                          ? "bg-gray-100 hover:bg-gray-200 text-gray-700"
+                          : "bg-blue-600 hover:bg-blue-700 text-white"
+                          }`}
+                      >
+                        {followLoading ? (
+                          <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-1" />
+                        ) : isFollowing ? (
+                          <UserCheck className="w-3 h-3 mr-1" />
+                        ) : (
+                          <UserPlus className="w-3 h-3 mr-1" />
+                        )}
+                        {followLoading ? "..." : isFollowing ? "Đang theo dõi" : "Theo dõi"}
+                      </Button>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="cursor-pointer hover:text-gray-700">
-                            {timeShared}
+                            {timePosted}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          {format(new Date(sharedPost?.createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", {
-                            locale: vi,
-                          })}
+                          {format(new Date(createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", { locale: vi })}
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                     <span className="text-gray-300">•</span>
-                    <TooltipProvider>{renderPrivacyIcon(sharedPost?.privacy)}</TooltipProvider>
+                    <TooltipProvider>{renderPrivacyIcon(post?.privacy)}</TooltipProvider>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Nội dung bài viết gốc */}
-            {sharedPost.content && (
-              <div className="px-4 pb-3 bg-white point-cursor" onClick={() => navigate(`/feed/post/${sharedPost._id}`)}>
-                <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed cursor-pointer">{sharedPost.content}</p>
-              </div>
-            )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem>Quan tâm</DropdownMenuItem>
+                  <DropdownMenuItem>Không quan tâm</DropdownMenuItem>
+                  <DropdownMenuItem>Ẩn bài viết</DropdownMenuItem>
 
-            {/* Media Gallery của bài viết gốc */}
-            {(sharedPost.images?.length > 0 || sharedPost.videos?.length > 0 || sharedPost.productIds?.length > 0) && (
-              <div className="bg-white">
-                <MediaGallery
-                  media={[
-                    ...(sharedPost.videos?.map((url) => ({ url, type: "video", source: "post" })) || []),
-                    ...(sharedPost.images?.map((url) => ({ url, type: "image", source: "post" })) || []),
-                    // Thêm media từ sản phẩm của bài viết gốc
-                    ...(sharedPost.productIds?.flatMap((product) => [
-                      ...(product.videos?.map((url) => ({
-                        url,
-                        type: "video",
-                        source: "product",
-                        productId: product._id,
-                        productName: product.name,
-                        productSlug: product.slug,
-                      })) || []),
-                      ...(product.images?.map((url) => ({
-                        url,
-                        type: "image",
-                        source: "product",
-                        productId: product._id,
-                        productName: product.name,
-                        productSlug: product.slug,
-                      })) || []),
-                    ]) || []),
-                  ]}
-                  postId={sharedPost._id}
-                  compact={true}
-                  hasProducts={sharedPost.productIds?.length > 0}
-                />
-              </div>
-            )}
-
-            {/* Product Cards của bài viết gốc */}
-            {sharedPost.productIds && sharedPost.productIds.length > 0 && (
-              <div className="px-4 pb-3 bg-white">
-                <div className="space-y-3">
-                  {sharedPost.productIds.map((product) => (
-                    <ProductCard key={product._id} product={product} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Media Gallery */}
-        {displayMedia.length > 0 && (
-          <div className="relative">
-            <MediaGallery media={displayMedia} postId={_id} hasProducts={hasProducts} />
-          </div>
-        )}
-
-        {/* Product Cards */}
-        {hasProducts && (
-          <div className="px-4 pb-3">
-            <div className="space-y-3">
-              {productIds.map((product) => (
-                <ProductCard key={product._id} product={product} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Interaction Stats */}
-        <div className="px-4 py-2 border-t border-gray-100">
-          <div className="flex justify-between items-center text-sm text-gray-600">
-            <div className="flex items-center gap-4">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      className="flex items-center gap-1 hover:text-red-500 transition-colors"
-                      onClick={() => likes > 0 && handleGetLikeList()}
-                    >
-                      <div className="flex -space-x-1">
-                        <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
-                          <Heart className="w-3 h-3 text-white fill-white" />
-                        </div>
-                      </div>
-                      <span>{likes > 0 ? `${likes.toLocaleString()}` : "Chưa có lượt thích"}</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {likesList.length === 0 ? (
-                      <div>Chưa có ai thích</div>
+                  <DropdownMenuItem
+                    onClick={handleToggleSave}
+                    disabled={saveLoading}
+                    className="flex items-center gap-2"
+                  >
+                    {saveLoading ? (
+                      <div className="w-4 h-4 border border-current border-t-transparent rounded-full animate-spin" />
+                    ) : isSaved ? (
+                      <BookmarkCheck className="w-4 h-4" />
                     ) : (
-                      <div className="max-w-[200px]">
-                        {likesList.slice(0, 5).map((user) => (
-                          <div key={user?._id} className="truncate">
-                            {user?.type === "User" ? user?.fullName : user?.name}
-                          </div>
-                        ))}
-                        {likesList.length > 5 && (
-                          <div className="text-gray-400 text-xs mt-1">... và {likesList.length - 5} người khác</div>
-                        )}
+                      <Bookmark className="w-4 h-4" />
+                    )}
+                    {saveLoading ? "Đang xử lý..." : isSaved ? "Bỏ lưu bài viết" : "Lưu bài viết"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
+          {/* Nội dung bài viết */}
+          {content && (
+            <div className="px-4 pb-3" onClick={() => navigate(`/feed/post/${post._id}`)}>
+              <p className="text-gray-900 whitespace-pre-line leading-relaxed cursor-pointer">{content}</p>
+            </div>
+          )}
+
+          {/* Bài viết được chia sẻ */}
+          {isSharedPost && sharedPost && (
+            <div className="mx-4 mb-3 border rounded-xl overflow-hidden bg-gray-50/50">
+              {/* Header của bài viết gốc */}
+              <div className="p-4 pb-3 bg-white">
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <img
+                      src={sharedPost.author?._id?.avatar || "/placeholder.svg?height=32&width=32"}
+                      className="w-8 h-8 rounded-full object-cover cursor-pointer ring-2 ring-gray-100"
+                      onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
+                      alt="Original author"
+                    />
+                    {sharedPost.author?.type === "Shop" && (
+                      <div className="absolute -bottom-1 -right-1 bg-blue-500 rounded-full p-0.5">
+                        <ShoppingCart className="w-2 h-2 text-white" />
                       </div>
                     )}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p
+                        className="font-medium text-sm cursor-pointer hover:underline"
+                        onClick={() => navigate(`/feed/profile/${sharedPost.author?._id?.slug}`)}
+                      >
+                        {sharedPost.author?._id?.fullName || sharedPost.author?._id?.name || "Người dùng"}
+                      </p>
+                      {sharedPost.author?.type === "Shop" && (
+                        <Badge variant="secondary" className="text-xs">
+                          Shop
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-pointer hover:text-gray-700">
+                              {timeShared}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {format(new Date(sharedPost?.createdAt), "EEEE, dd 'tháng' MM, yyyy 'lúc' HH:mm", {
+                              locale: vi,
+                            })}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <span className="text-gray-300">•</span>
+                      <TooltipProvider>{renderPrivacyIcon(sharedPost?.privacy)}</TooltipProvider>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-            <div className="flex items-center gap-4 text-sm">
-              <button className="hover:underline hover:text-blue-600 transition-colors" onClick={handleComment}>
-                {comments || 0} bình luận
-              </button>
-              <button className="hover:underline hover:text-green-600 transition-colors" onClick={handleGetShareList}>
-                {shares || 0} chia sẻ
-              </button>
+              {/* Nội dung bài viết gốc */}
+              {sharedPost.content && (
+                <div className="px-4 pb-3 bg-white point-cursor" onClick={() => navigate(`/feed/post/${sharedPost._id}`)}>
+                  <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed cursor-pointer">{sharedPost.content}</p>
+                </div>
+              )}
 
-              {user && user._id !== author?._id?._id && (
-                <Button
-                  onClick={handleMessage}
-                  size="sm"
-                  variant="ghost"
-                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-7 px-2"
-                >
-                  <Send className="w-4 h-4 mr-1" />
-                  Nhắn tin
-                </Button>
+              {/* Media Gallery của bài viết gốc */}
+              {(sharedPost.images?.length > 0 || sharedPost.videos?.length > 0 || sharedPost.productIds?.length > 0) && (
+                <div className="bg-white">
+                  <MediaGallery
+                    media={[
+                      ...(sharedPost.videos?.map((url) => ({ url, type: "video", source: "post" })) || []),
+                      ...(sharedPost.images?.map((url) => ({ url, type: "image", source: "post" })) || []),
+                      // Thêm media từ sản phẩm của bài viết gốc
+                      ...(sharedPost.productIds?.flatMap((product) => [
+                        ...(product.videos?.map((url) => ({
+                          url,
+                          type: "video",
+                          source: "product",
+                          productId: product._id,
+                          productName: product.name,
+                          productSlug: product.slug,
+                        })) || []),
+                        ...(product.images?.map((url) => ({
+                          url,
+                          type: "image",
+                          source: "product",
+                          productId: product._id,
+                          productName: product.name,
+                          productSlug: product.slug,
+                        })) || []),
+                      ]) || []),
+                    ]}
+                    postId={sharedPost._id}
+                    compact={true}
+                    hasProducts={sharedPost.productIds?.length > 0}
+                    isVisible={isVisible}
+                  />
+                </div>
+              )}
+
+              {/* Product Cards của bài viết gốc */}
+              {sharedPost.productIds && sharedPost.productIds.length > 0 && (
+                <div className="px-4 pb-3 bg-white">
+                  <div className="space-y-3">
+                    {sharedPost.productIds.map((product) => (
+                      <ProductCard key={product._id} product={product} />
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
+          )}
+
+          {/* Media Gallery */}
+          {displayMedia.length > 0 && (
+            <div className="relative">
+              <MediaGallery media={displayMedia} postId={_id} hasProducts={hasProducts} isVisible={isVisible} />
+            </div>
+          )}
+
+          {/* Product Cards */}
+          {hasProducts && (
+            <div className="px-4 pb-3">
+              <div className="space-y-3">
+                {productIds.map((product) => (
+                  <ProductCard key={product._id} product={product} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Interaction Stats */}
+          <div className="px-4 py-2 border-t border-gray-100">
+            <div className="flex justify-between items-center text-sm text-gray-600">
+              <div className="flex items-center gap-4">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        className="flex items-center gap-1 hover:text-red-500 transition-colors"
+                        onClick={() => likes > 0 && handleGetLikeList()}
+                      >
+                        <div className="flex -space-x-1">
+                          <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                            <Heart className="w-3 h-3 text-white fill-white" />
+                          </div>
+                        </div>
+                        <span>{likes > 0 ? `${likes.toLocaleString()}` : "Chưa có lượt thích"}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {likesList.length === 0 ? (
+                        <div>Chưa có ai thích</div>
+                      ) : (
+                        <div className="max-w-[200px]">
+                          {likesList.slice(0, 5).map((user) => (
+                            <div key={user?._id} className="truncate">
+                              {user?.type === "User" ? user?.fullName : user?.name}
+                            </div>
+                          ))}
+                          {likesList.length > 5 && (
+                            <div className="text-gray-400 text-xs mt-1">... và {likesList.length - 5} người khác</div>
+                          )}
+                        </div>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+
+              <div className="flex items-center gap-4 text-sm">
+                <button className="hover:underline hover:text-blue-600 transition-colors" onClick={handleComment}>
+                  {comments || 0} bình luận
+                </button>
+                <button className="hover:underline hover:text-green-600 transition-colors" onClick={handleGetShareList}>
+                  {shares || 0} chia sẻ
+                </button>
+
+                {user && user._id !== author?._id?._id && (
+                  <Button
+                    onClick={handleMessage}
+                    size="sm"
+                    variant="ghost"
+                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-7 px-2"
+                  >
+                    <Send className="w-4 h-4 mr-1" />
+                    Nhắn tin
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/30">
-          <div className="grid grid-cols-3 gap-1">
-            <Button
-              onClick={handleLike}
-              variant="ghost"
-              className={`flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${liked ? "text-red-500 bg-red-50 hover:bg-red-100" : "text-gray-700 hover:bg-gray-100"
-                }`}
-            >
-              <Heart className={`w-5 h-5 ${liked ? "fill-red-500" : ""}`} />
-              <span className="font-medium">Thích</span>
-            </Button>
+          {/* Action Buttons */}
+          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/30">
+            <div className="grid grid-cols-3 gap-1">
+              <Button
+                onClick={handleLike}
+                variant="ghost"
+                className={`flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${liked ? "text-red-500 bg-red-50 hover:bg-red-100" : "text-gray-700 hover:bg-gray-100"
+                  }`}
+              >
+                <Heart className={`w-5 h-5 ${liked ? "fill-red-500" : ""}`} />
+                <span className="font-medium">Thích</span>
+              </Button>
 
-            <Button
-              onClick={handleComment}
-              variant="ghost"
-              className="flex items-center justify-center gap-2 py-2 rounded-lg text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all"
-            >
-              <MessageCircle className="w-5 h-5" />
-              <span className="font-medium">Bình luận</span>
-            </Button>
+              <Button
+                onClick={handleComment}
+                variant="ghost"
+                className="flex items-center justify-center gap-2 py-2 rounded-lg text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all"
+              >
+                <MessageCircle className="w-5 h-5" />
+                <span className="font-medium">Bình luận</span>
+              </Button>
 
-            <Button
-              onClick={handleShare}
-              variant="ghost"
-              className="flex items-center justify-center gap-2 py-2 rounded-lg text-gray-700 hover:bg-green-50 hover:text-green-600 transition-all"
-            >
-              <Share className="w-5 h-5" />
-              <span className="font-medium">Chia sẻ</span>
-            </Button>
+              <Button
+                onClick={handleShare}
+                variant="ghost"
+                className="flex items-center justify-center gap-2 py-2 rounded-lg text-gray-700 hover:bg-green-50 hover:text-green-600 transition-all"
+              >
+                <Share className="w-5 h-5" />
+                <span className="font-medium">Chia sẻ</span>
+              </Button>
+            </div>
           </div>
-        </div>
-      </CardContent>
+        </CardContent>
 
-      {/* Modals */}
-      <LikesListModal open={openLikesModal} onOpenChange={setOpenLikesModal} likes={likesList} />
-      <CommentModal open={openComment} onClose={setOpenComment} postId={_id} />
-      <SharePostModal
-        open={openShare}
-        onOpenChange={setOpenShare}
-        post={postToShare}
-        postIdToShare={postIdToShare}
-        onShareCompleted={handleShareCompleted}
-      />
-      <SharesListModal open={openSharesModal} onOpenChange={setOpenSharesModal} shares={sharesList} />
-    </Card>
+        {/* Modals */}
+        <LikesListModal open={openLikesModal} onOpenChange={setOpenLikesModal} likes={likesList} />
+        <CommentModal open={openComment} onClose={setOpenComment} postId={_id} />
+        <SharePostModal
+          open={openShare}
+          onOpenChange={setOpenShare}
+          post={postToShare}
+          postIdToShare={postIdToShare}
+          onShareCompleted={handleShareCompleted}
+        />
+        <SharesListModal open={openSharesModal} onOpenChange={setOpenSharesModal} shares={sharesList} />
+      </Card>
+    </div>
   )
 }

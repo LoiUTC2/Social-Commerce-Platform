@@ -622,10 +622,26 @@ exports.searchAll = async (req, res) => {
     }
 };
 
-// Lấy từ khóa tìm kiếm phổ biến
+// Lấy từ khóa tìm kiếm phổ biến với phân trang
 exports.getPopularSearches = async (req, res) => {
     try {
-        const { limit = 10, timeRange = '7d' } = req.query;
+        const { 
+            limit = 10, 
+            timeRange = '7d',
+            page = 1,
+            offset
+        } = req.query;
+
+        const limitNum = parseInt(limit);
+        const pageNum = parseInt(page);
+        
+        // Tính toán skip: ưu tiên offset nếu có, không thì dùng page
+        let skip;
+        if (offset !== undefined) {
+            skip = parseInt(offset);
+        } else {
+            skip = (pageNum - 1) * limitNum;
+        }
 
         let dateFilter = {};
         const now = new Date();
@@ -644,7 +660,27 @@ exports.getPopularSearches = async (req, res) => {
                 dateFilter = { $gte: new Date(now - 7 * 24 * 60 * 60 * 1000) };
         }
 
-        const popularSearches = await UserInteraction.aggregate([
+        // Pipeline để đếm tổng số từ khóa unique
+        const countPipeline = [
+            {
+                $match: {
+                    action: 'search',
+                    timestamp: dateFilter,
+                    'targetDetails.searchQuery': { $exists: true, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$targetDetails.searchQuery'
+                }
+            },
+            {
+                $count: "totalCount"
+            }
+        ];
+
+        // Pipeline để lấy dữ liệu với phân trang
+        const dataPipeline = [
             {
                 $match: {
                     action: 'search',
@@ -663,7 +699,10 @@ exports.getPopularSearches = async (req, res) => {
                 $sort: { count: -1 }
             },
             {
-                $limit: parseInt(limit)
+                $skip: skip
+            },
+            {
+                $limit: limitNum
             },
             {
                 $project: {
@@ -673,13 +712,42 @@ exports.getPopularSearches = async (req, res) => {
                     _id: 0
                 }
             }
+        ];
+
+        // Thực hiện cả 2 pipeline song song
+        const [countResult, popularSearches] = await Promise.all([
+            UserInteraction.aggregate(countPipeline),
+            UserInteraction.aggregate(dataPipeline)
         ]);
 
-        return successResponse(res, "Lấy từ khóa phổ biến thành công", {
+        // Lấy tổng số từ countResult
+        const totalCount = countResult.length > 0 ? countResult[0].totalCount : 0;
+
+        // Tính toán thông tin phân trang
+        const totalPages = Math.ceil(totalCount / limitNum);
+        const hasNextPage = pageNum < totalPages;
+        const hasPrevPage = pageNum > 1;
+
+        const paginationInfo = {
+            currentPage: pageNum,
+            totalPages,
+            totalCount,
+            limit: limitNum,
+            hasNextPage,
+            hasPrevPage,
+            nextPage: hasNextPage ? pageNum + 1 : null,
+            prevPage: hasPrevPage ? pageNum - 1 : null,
+            timeRange
+        };
+
+        const responseData = {
             searches: popularSearches,
+            pagination: paginationInfo,
             timeRange,
             generatedAt: new Date()
-        });
+        };
+
+        return successResponse(res, "Lấy từ khóa phổ biến thành công", responseData);
     } catch (err) {
         return errorResponse(res, "Lỗi khi lấy từ khóa phổ biến", 500, err.message);
     }
